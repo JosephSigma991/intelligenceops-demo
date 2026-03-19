@@ -1,0 +1,19 @@
+{
+    "stamp": "20260318_120000",
+    "region": "EAT7",
+    "scope": "EAT7",
+    "mode": "POSONLY",
+    "git_branch": "main",
+    "git_commit": "0000000000000000000000000000000000000000",
+    "insights_dir": "demo_data/insight_out",
+    "required_files": [
+        "2025_DEP_Monthly_Station_KPIs__EAT7.csv",
+        "2025_DEP_Weekly_Station_KPIs__EAT7.csv",
+        "2025_DEP_Owner_Minutes__EAT7_NORM.csv",
+        "2025_DEP_TopDelayCodes__EAT7_NORM.csv",
+        "2025_DEP_DelayCategory_Minutes__EAT7_NORM.csv",
+        "2025_DEP_DelayCategory_Minutes__EAT7_NORM__MONTHLY.csv",
+        "2025_DEP_DelayCategory_Minutes__EAT7_NORM__WEEKLY.csv"
+    ],
+    "qa_summary_path": "demo_data/insight_out/qa_summary__EAT7__POSONLY__20260318_120000.csv"
+}

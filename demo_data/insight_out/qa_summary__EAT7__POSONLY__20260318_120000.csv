@@ -1,0 +1,8 @@
+FileName,Exists,Rows,Cols,Status,Notes
+2025_DEP_Monthly_Station_KPIs__EAT7.csv,True,72,9,PASS,synthetic demo data
+2025_DEP_Weekly_Station_KPIs__EAT7.csv,True,312,9,PASS,synthetic demo data
+2025_DEP_Owner_Minutes__EAT7_NORM.csv,True,42,7,PASS,synthetic demo data
+2025_DEP_TopDelayCodes__EAT7_NORM.csv,True,132,9,PASS,synthetic demo data
+2025_DEP_DelayCategory_Minutes__EAT7_NORM.csv,True,42,7,PASS,synthetic demo data
+2025_DEP_DelayCategory_Minutes__EAT7_NORM__MONTHLY.csv,True,504,8,PASS,synthetic demo data
+2025_DEP_DelayCategory_Minutes__EAT7_NORM__WEEKLY.csv,True,2184,8,PASS,synthetic demo data
