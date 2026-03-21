@@ -524,7 +524,6 @@ with st.expander("📋 Data Source & Pipeline Details", expanded=False):
     hdr_c3.metric("Version", str(git_commit)[:8] if git_commit else "<missing>")
     hdr_c4.metric("QA File", Path(str(qa_path)).name if qa_path else "<missing>")
 
-st.caption(f"debug qa_path: {qa_path}")
 if not isinstance(qa_df, pd.DataFrame) or qa_df.empty:
     st.error("Contract gate failed: qa_summary is missing or empty.")
     st.stop()
