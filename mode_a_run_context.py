@@ -244,6 +244,12 @@ def get_or_select_run_context(st, insights_dir: Path) -> dict[str, Any]:
         st.stop()
 
     qa_path = resolve_qa_path(run_stamp, effective_insights_dir, region, mode)
+    # Fallback: if resolved path doesn't exist (e.g. relative path double-nesting on
+    # Streamlit Cloud), glob for any qa_summary__*.csv in insights_dir.
+    if qa_path is None or not qa_path.exists():
+        candidates = sorted(effective_insights_dir.glob("qa_summary__*.csv"))
+        if candidates:
+            qa_path = candidates[-1]
     qa_df = pd.DataFrame()
     if qa_path is not None and qa_path.exists():
         try:
