@@ -110,7 +110,7 @@ def render_global_filters(st, ctx: dict[str, Any]) -> dict[str, Any]:
 
     all_periods = periods_df["Period"].astype(str).tolist()
     sort_lookup = dict(zip(periods_df["Period"].astype(str), periods_df["_sort"]))
-    period_mode_prev = str(prev.get("period_mode", "Single"))
+    period_mode_prev = str(prev.get("period_mode", "Range"))
     period_mode_opts = ["Single", "Multi", "Range", "Full Year"]
     period_mode_idx = period_mode_opts.index(period_mode_prev) if period_mode_prev in period_mode_opts else 0
     period_mode = st.sidebar.radio("Period Mode", options=period_mode_opts, index=period_mode_idx, key="mode_a_global__period_mode")
