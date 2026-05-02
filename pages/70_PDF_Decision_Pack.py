@@ -26,10 +26,12 @@ from kpi_config import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+PUBLIC_SCOPE_LABEL = "Synthetic Demo"
+PUBLIC_PDF_FILENAME = "IntelligenceOps_Synthetic_DecisionPack.pdf"
 
 
 def default_insights_dir() -> Path:
-    return Path(os.getenv("FLIGHTOPS_INSIGHTS_DIR", r"C:\Users\IT\02_insights\insight_out"))
+    return Path(os.getenv("FLIGHTOPS_INSIGHTS_DIR", REPO_ROOT / "demo_data" / "insight_out"))
 
 
 def _detect_streamlit_runtime() -> bool:
@@ -464,6 +466,139 @@ def build_drivers_summary(
     return grp.head(10).reset_index(drop=True), scope_note
 
 
+def _normalized_category_label(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value).strip().lower())
+
+
+def _delay_bucket(value: Any) -> str:
+    label = _normalized_category_label(value)
+    if not label:
+        return "Other / not classified"
+    if "groundops" in label or label == "gops":
+        return "Controllable - Ground Ops"
+    if (
+        "latearrival" in label
+        or "reactionary" in label
+        or "inherited" in label
+        or "lateaircraft" in label
+        or "lateacft" in label
+    ):
+        return "Inherited / reactionary"
+    if "weather" in label or "atc" in label or "airport" in label or "uncontrollable" in label:
+        return "Other / not classified"
+    return "Controllable - Other categories"
+
+
+def build_accountability_split(
+    delay_df: pd.DataFrame,
+    period: str,
+    station_selection: str,
+    mapping: dict[str, str | None],
+) -> pd.DataFrame:
+    period_col = mapping["period"]
+    station_col = mapping["station"]
+    category_col = mapping["category"]
+    minutes_col = mapping["minutes"]
+    if period_col is None or category_col is None or minutes_col is None:
+        return pd.DataFrame(columns=["Bucket", "Minutes", "SharePct"])
+
+    d = delay_df[delay_df["_period"] == period].copy()
+    if station_selection != "NETWORK" and station_col is not None:
+        d = d[d[station_col].astype(str) == station_selection].copy()
+    if d.empty:
+        return pd.DataFrame(columns=["Bucket", "Minutes", "SharePct"])
+
+    d["_bucket"] = d[category_col].map(_delay_bucket)
+    d["_minutes"] = pd.to_numeric(d[minutes_col], errors="coerce").fillna(0.0)
+    rows = (
+        d.groupby("_bucket", as_index=False)["_minutes"]
+        .sum()
+        .rename(columns={"_bucket": "Bucket", "_minutes": "Minutes"})
+    )
+
+    bucket_order = [
+        "Controllable - Ground Ops",
+        "Controllable - Other categories",
+        "Inherited / reactionary",
+        "Other / not classified",
+    ]
+    rows["_order"] = rows["Bucket"].map({v: i for i, v in enumerate(bucket_order)}).fillna(99)
+    rows = rows.sort_values(["_order", "Bucket"]).drop(columns=["_order"]).reset_index(drop=True)
+    total = float(pd.to_numeric(rows["Minutes"], errors="coerce").sum())
+    rows["SharePct"] = (rows["Minutes"] / total * 100.0) if total > 0 else 0.0
+    return rows
+
+
+def build_executive_findings(
+    snapshot: dict[str, Any],
+    drivers_df: pd.DataFrame,
+    accountability_df: pd.DataFrame,
+    station_df: pd.DataFrame,
+) -> list[str]:
+    findings: list[str] = []
+
+    otp = snapshot.get("OTP")
+    avg_delay = snapshot.get("AvgDelay")
+    if otp is not None and not pd.isna(otp):
+        target_gap = 85.0 - float(otp)
+        if target_gap > 0:
+            findings.append(f"OTP is {fmt_float(target_gap, 1)} points below the demo target for the selected scope.")
+        else:
+            findings.append("OTP is at or above the demo target for the selected scope.")
+    elif avg_delay is not None and not pd.isna(avg_delay):
+        findings.append(f"Average departure delay is {fmt_float(avg_delay, 2)} minutes per operated flight in the selected scope.")
+    else:
+        findings.append("KPI status is limited because the selected scope does not expose all snapshot fields.")
+
+    if drivers_df is not None and not drivers_df.empty:
+        top = drivers_df.iloc[0]
+        findings.append(
+            f"Top delay category in the selected synthetic scope is {top.get('DelayCategory')} "
+            f"at {fmt_float(top.get('SharePct'), 1)}% of category minutes."
+        )
+
+    if accountability_df is not None and not accountability_df.empty:
+        ctrl_mask = accountability_df["Bucket"].astype(str).str.startswith("Controllable")
+        ctrl_share = float(pd.to_numeric(accountability_df.loc[ctrl_mask, "SharePct"], errors="coerce").fillna(0).sum())
+        findings.append(f"Controllable categories represent {fmt_float(ctrl_share, 1)}% of categorized delay minutes.")
+
+    if station_df is not None and not station_df.empty:
+        findings.append("Station review ranks synthetic stations by average departure delay for follow-up prioritization.")
+
+    return findings[:4]
+
+
+def build_sanitized_appendix(
+    required_files: list[str],
+    station_kpi_df: pd.DataFrame,
+    delay_minutes_df: pd.DataFrame,
+    qa_df: pd.DataFrame | None,
+) -> pd.DataFrame:
+    rows = [
+        {
+            "Item": "Synthetic data contract",
+            "Status": "Available" if required_files else "Not available",
+            "Detail": f"{len(required_files)} artifacts registered" if required_files else "No contract registry found",
+        },
+        {
+            "Item": "Station KPI artifact",
+            "Status": "Available" if station_kpi_df is not None and not station_kpi_df.empty else "Not available",
+            "Detail": f"{len(station_kpi_df):,} rows" if station_kpi_df is not None and not station_kpi_df.empty else "No rows loaded",
+        },
+        {
+            "Item": "Delay category artifact",
+            "Status": "Available" if delay_minutes_df is not None and not delay_minutes_df.empty else "Not available",
+            "Detail": f"{len(delay_minutes_df):,} rows" if delay_minutes_df is not None and not delay_minutes_df.empty else "No rows loaded",
+        },
+        {
+            "Item": "QA summary",
+            "Status": "Available" if qa_df is not None and not qa_df.empty else "Not included",
+            "Detail": f"{len(qa_df):,} rows" if qa_df is not None and not qa_df.empty else "Technical appendix only",
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
 def build_qa_excerpt(qa_df: pd.DataFrame | None, required_files: list[str], insights_dir: Path) -> pd.DataFrame:
     qa_lookup: dict[str, dict[str, Any]] = {}
     qa_file_names: list[str] = []
@@ -528,18 +663,19 @@ def df_for_pdf(df: pd.DataFrame, cols: list[str], max_rows: int = 20) -> pd.Data
 
 def build_pdf_bytes(
     title: str,
-    provenance_lines: list[str],
-    input_lines: list[str],
+    grain: str,
+    period_selected: str,
+    station_selected: str,
     snapshot: dict[str, Any],
     worst_df: pd.DataFrame,
-    best_df: pd.DataFrame,
     drivers_df: pd.DataFrame,
-    drivers_scope_note: str,
-    qa_excerpt_df: pd.DataFrame,
+    accountability_df: pd.DataFrame,
+    appendix_df: pd.DataFrame,
+    executive_findings: list[str],
     include_snapshot: bool,
     include_ranking: bool,
     include_drivers: bool,
-    include_qa: bool,
+    include_appendix: bool,
     otp_chart_png: bytes | None = None,
     pareto_chart_png: bytes | None = None,
 ) -> bytes:
@@ -554,7 +690,16 @@ def build_pdf_bytes(
 
     styles = getSampleStyleSheet()
     buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=28, rightMargin=1.5*cm, topMargin=28, bottomMargin=28, title=title)
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=28,
+        rightMargin=1.5 * cm,
+        topMargin=28,
+        bottomMargin=28,
+        title=title,
+        pageCompression=0,
+    )
     story: list[Any] = []
 
     def add_table_from_df(section_title: str, tdf: pd.DataFrame) -> None:
@@ -585,17 +730,29 @@ def build_pdf_bytes(
         story.append(tbl)
         story.append(Spacer(1, 10))
 
-    story.append(Paragraph("Decision Pack", styles["Title"]))
-    story.append(Spacer(1, 6))
-    story.append(Paragraph(datetime.now().strftime("Generated: %Y-%m-%d %H:%M:%S"), styles["Normal"]))
+    story.append(Paragraph("IntelligenceOps Synthetic Decision Pack", styles["Title"]))
     story.append(Spacer(1, 8))
-    for line in provenance_lines:
+    story.append(Paragraph("Public demo using synthetic flight operations data.", styles["Heading2"]))
+    story.append(Spacer(1, 8))
+    cover_lines = [
+        f"Scope: {PUBLIC_SCOPE_LABEL}",
+        f"Selection: {grain} | {period_selected} | {station_selected}",
+        datetime.now().strftime("Generated: %Y-%m-%d %H:%M:%S"),
+        "Synthetic note: station codes, delay minutes, OTP figures, trends, and outputs are computer-generated for demonstration.",
+        "No employer data, real station figures, internal context, or company identity is present.",
+    ]
+    for line in cover_lines:
         story.append(Paragraph(line, styles["Normal"]))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("Executive Summary", styles["Heading1"]))
+    if executive_findings:
+        for finding in executive_findings:
+            story.append(Paragraph(f"- {finding}", styles["Normal"]))
+            story.append(Spacer(1, 3))
+    else:
+        story.append(Paragraph("No executive findings are available for the selected synthetic scope.", styles["Normal"]))
     story.append(Spacer(1, 10))
-    story.append(Paragraph("Inputs", styles["Heading2"]))
-    for line in input_lines:
-        story.append(Paragraph(line, styles["Normal"]))
-    story.append(PageBreak())
 
     if otp_chart_png is not None:
         story.append(Paragraph("OTP D15 Trend", styles["Heading2"]))
@@ -618,42 +775,43 @@ def build_pdf_bytes(
                 }
             ]
         )
-        add_table_from_df("B) Snapshot", snap_df)
+        add_table_from_df("KPI Snapshot", snap_df)
     if include_ranking:
         worst_pdf = df_for_pdf(worst_df, ["Station", "AvgDelayMin", "Flights", "TotalMinutes"], max_rows=10).copy()
-        best_pdf = df_for_pdf(best_df, ["Station", "AvgDelayMin", "Flights", "TotalMinutes"], max_rows=10).copy()
         if not worst_pdf.empty:
             worst_pdf["AvgDelayMin"] = worst_pdf["AvgDelayMin"].map(lambda x: fmt_float(x, 2))
             worst_pdf["Flights"] = worst_pdf["Flights"].map(fmt_int)
             worst_pdf["TotalMinutes"] = worst_pdf["TotalMinutes"].map(fmt_int)
-        if not best_pdf.empty:
-            best_pdf["AvgDelayMin"] = best_pdf["AvgDelayMin"].map(lambda x: fmt_float(x, 2))
-            best_pdf["Flights"] = best_pdf["Flights"].map(fmt_int)
-            best_pdf["TotalMinutes"] = best_pdf["TotalMinutes"].map(fmt_int)
-        add_table_from_df("C1) Station Ranking - Worst 10", worst_pdf)
-        add_table_from_df("C2) Station Ranking - Best 10", best_pdf)
+        add_table_from_df("Station Review", worst_pdf)
     if include_drivers:
-        story.append(Paragraph("D) Drivers Summary", styles["Heading2"]))
-        story.append(Paragraph(f"Scope note: {drivers_scope_note}", styles["Normal"]))
+        story.append(Paragraph("Delay Accountability", styles["Heading2"]))
+        story.append(Paragraph("Owner basis is DelayCategory. The split below uses selected-scope synthetic category minutes.", styles["Normal"]))
         story.append(Spacer(1, 6))
         drv_pdf = df_for_pdf(drivers_df, ["DelayCategory", "Minutes", "SharePct"], max_rows=10).copy()
         if not drv_pdf.empty:
             drv_pdf["Minutes"] = drv_pdf["Minutes"].map(fmt_int)
             drv_pdf["SharePct"] = drv_pdf["SharePct"].map(lambda x: fmt_float(x, 2))
-        add_table_from_df("Top 10 Delay Categories", drv_pdf)
-    if pareto_chart_png is not None:
-        story.append(Spacer(1, 6))
-        from io import BytesIO as _BytesIO
-        pareto_img = Image(_BytesIO(pareto_chart_png), width=14 * cm, height=7.3 * cm)
-        story.append(pareto_img)
+        add_table_from_df("DelayCategory Pareto Table", drv_pdf)
+        if pareto_chart_png is not None:
+            story.append(Spacer(1, 6))
+            from io import BytesIO as _BytesIO
+            pareto_img = Image(_BytesIO(pareto_chart_png), width=14 * cm, height=7.3 * cm)
+            story.append(pareto_img)
+            story.append(Spacer(1, 8))
+
+        split_pdf = df_for_pdf(accountability_df, ["Bucket", "Minutes", "SharePct"], max_rows=10).copy()
+        if not split_pdf.empty:
+            split_pdf["Minutes"] = split_pdf["Minutes"].map(fmt_int)
+            split_pdf["SharePct"] = split_pdf["SharePct"].map(lambda x: fmt_float(x, 2))
+        add_table_from_df("Controllable / Inherited / Reactionary Split", split_pdf)
+
+    if include_appendix:
+        story.append(PageBreak())
+        story.append(Paragraph("Sanitized Technical Appendix", styles["Heading1"]))
+        story.append(Paragraph("Appendix contains public-safe contract status only. Local paths and raw run context are intentionally excluded.", styles["Normal"]))
         story.append(Spacer(1, 8))
-    if include_qa:
-        qa_pdf = df_for_pdf(
-            qa_excerpt_df,
-            ["FileName", "Exists", "SizeBytes", "Rows", "Cols", "MinYearMonth", "MaxYearMonth", "MinYearWeek", "MaxYearWeek"],
-            max_rows=20,
-        )
-        add_table_from_df("E) Coverage / QA Excerpt", qa_pdf)
+        appendix_pdf = df_for_pdf(appendix_df, ["Item", "Status", "Detail"], max_rows=20)
+        add_table_from_df("Demo Data Contract", appendix_pdf)
 
     doc.build(story)
     return buf.getvalue()
@@ -668,7 +826,7 @@ def export_decision_pack_pdf(
     include_snapshot: bool = True,
     include_ranking: bool = True,
     include_drivers: bool = True,
-    include_qa: bool = True,
+    include_qa: bool = False,
 ) -> Path:
     if not isinstance(ctx, dict):
         raise ValueError("Invalid ctx: expected dict.")
@@ -676,16 +834,13 @@ def export_decision_pack_pdf(
     run_stamp = ctx.get("run_stamp") if isinstance(ctx.get("run_stamp"), dict) else {}
     region = str(ctx.get("region", "")).strip()
     mode = str(ctx.get("mode", "")).strip()
-    pass_stamp = ctx.get("stamp")
-    git_commit = ctx.get("git_commit")
-    git_branch = ctx.get("git_branch")
     required_files = ensure_list(ctx.get("required_files"))
     insights_dir = Path(ctx.get("insights_dir", default_insights_dir()))
     qa_summary_path = ctx.get("qa_path")
     artifacts_by_name = ctx.get("artifacts_by_name", {}) or {}
 
     if not region or not mode:
-        raise RuntimeError("Run context missing region/mode.")
+        raise RuntimeError("Demo data context missing scope metadata.")
     if not required_files:
         raise RuntimeError("run_stamp.required_files is missing/empty.")
 
@@ -756,73 +911,41 @@ def export_decision_pack_pdf(
             raise ValueError(f"Requested station not found in active stations for period {period_selected}: {station}")
 
     snapshot = build_snapshot(period_slice, station_selected, kpi_mapping)
-    worst_df, best_df = build_station_ranking(period_slice, kpi_mapping)
-    coverage_flights = compute_coverage_flights_operated(station_kpi_df, grain, period_selected, station_selected)
+    worst_df, _best_df = build_station_ranking(period_slice, kpi_mapping)
     if not delay_work.empty:
         drivers_df, drivers_scope_note = build_drivers_summary(delay_work, period_selected, station_selected, delay_mapping)
+        accountability_df = build_accountability_split(delay_work, period_selected, station_selected, delay_mapping)
     else:
         drivers_df, drivers_scope_note = pd.DataFrame(), "delay minutes source unavailable"
+        accountability_df = pd.DataFrame(columns=["Bucket", "Minutes", "SharePct"])
 
-    qa_df = load_csv(qa_summary_path) if (qa_summary_path is not None and qa_summary_path.exists()) else None
-    qa_excerpt_df = build_qa_excerpt(qa_df, required_files, insights_dir)
+    qa_df = load_csv(qa_summary_path) if (include_qa and qa_summary_path is not None and qa_summary_path.exists()) else None
+    appendix_df = build_sanitized_appendix(required_files, station_kpi_df, delay_minutes_df, qa_df)
+    executive_findings = build_executive_findings(snapshot, drivers_df, accountability_df, worst_df)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    pdf_name = (
-        f"DecisionPack__{sanitize_token(region)}__{sanitize_token(mode)}__{sanitize_token(pass_stamp, 'nostamp')}"
-        f"__{sanitize_token(grain)}__{sanitize_token(period_selected)}__{sanitize_token(station_selected)}.pdf"
-    )
+    pdf_name = PUBLIC_PDF_FILENAME
     pdf_path = out_dir / pdf_name
     latest_pdf_path = out_dir / "DecisionPack__LATEST.pdf"
-
-    ops_gate_pack_verdict = maybe_get(run_stamp, "ops_gate_pack_verdict", "OpsGatePackVerdict")
-    ops_gate_pack_log_path = maybe_get(run_stamp, "ops_gate_pack_log_path", "OpsGatePackLogPath")
-    b1_log_path = maybe_get(run_stamp, "b1_refresh_publish_log_path", "B1RefreshPublishLogPath", "b1_log_path")
-    filters_meta = ctx.get("mode_a_filters", {}) if isinstance(ctx.get("mode_a_filters"), dict) else {}
-    f_grain = str(filters_meta.get("grain", grain))
-    f_periods = [str(p) for p in filters_meta.get("periods", []) if str(p).strip()]
-    f_stations = [str(s) for s in filters_meta.get("stations", []) if str(s).strip()]
-    f_period_summary = f_periods[0] if len(f_periods) == 1 else (f"{f_periods[0]}..{f_periods[-1]} ({len(f_periods)})" if f_periods else str(period_selected))
-    f_station_mode = str(filters_meta.get("station_mode", "NETWORK" if f_stations == ["NETWORK"] else "Multi"))
-    f_station_count = 1 if f_stations == ["NETWORK"] else len(f_stations)
-    provenance_pdf = [
-        f"run_stamp stamp: {pass_stamp}",
-        f"region/mode: {region}/{mode}",
-        f"git_branch: {git_branch}",
-        f"git_commit: {git_commit}",
-        f"ops_gate_pack_verdict: {ops_gate_pack_verdict if ops_gate_pack_verdict else 'not available'}",
-        f"selection: grain={grain} period={period_selected} station={station_selected}",
-        f"Coverage: Flights Operated: {coverage_flights:,}",
-        f"EvidenceRefs: ops_gate_pack_log_path: {ops_gate_pack_log_path if ops_gate_pack_log_path else 'not available'}",
-        f"EvidenceRefs: ops_gate_pack_verdict: {ops_gate_pack_verdict if ops_gate_pack_verdict else 'not available'}",
-        f"EvidenceRefs: qa_summary_path: {qa_summary_path if qa_summary_path else 'not available'}",
-        f"EvidenceRefs: b1_refresh_publish_log_path: {b1_log_path if b1_log_path else 'not available'}",
-        f"GlobalFilters: grain={f_grain}",
-        f"GlobalFilters: periods={f_period_summary}",
-        f"GlobalFilters: stations_mode={f_station_mode} count={f_station_count}",
-    ]
-    inputs_pdf = [
-        f"station_kpi_file: {station_kpi_path}",
-        f"delaycategory_minutes_file: {delay_minutes_path}",
-        f"qa_summary_path: {qa_summary_path}",
-    ]
     # Build chart PNGs (graceful: None if kaleido unavailable or data insufficient)
     otp_chart_png = build_otp_trend_png(kpi_work, kpi_mapping, grain)
     pareto_chart_png = build_pareto_png(drivers_df) if include_drivers else None
 
     pdf_bytes = build_pdf_bytes(
-        title=pdf_name,
-        provenance_lines=provenance_pdf,
-        input_lines=inputs_pdf,
+        title="IntelligenceOps Synthetic Decision Pack",
+        grain=grain,
+        period_selected=period_selected,
+        station_selected=station_selected,
         snapshot=snapshot,
         worst_df=worst_df,
-        best_df=best_df,
         drivers_df=drivers_df,
-        drivers_scope_note=drivers_scope_note,
-        qa_excerpt_df=qa_excerpt_df,
+        accountability_df=accountability_df,
+        appendix_df=appendix_df,
+        executive_findings=executive_findings,
         include_snapshot=include_snapshot,
         include_ranking=include_ranking,
         include_drivers=include_drivers,
-        include_qa=include_qa,
+        include_appendix=include_qa,
         otp_chart_png=otp_chart_png,
         pareto_chart_png=pareto_chart_png,
     )
@@ -849,7 +972,7 @@ def parse_flag_int(v: Any) -> bool:
 
 
 def cli_main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="D7 PDF Decision Pack headless exporter")
+    parser = argparse.ArgumentParser(description="Public-safe synthetic decision pack exporter")
     parser.add_argument("--region", required=True)
     parser.add_argument("--mode", required=True)
     parser.add_argument("--grain", required=True, choices=["Monthly", "Weekly"])
@@ -858,7 +981,7 @@ def cli_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--include_snapshot", default="1")
     parser.add_argument("--include_ranking", default="1")
     parser.add_argument("--include_drivers", default="1")
-    parser.add_argument("--include_qa", default="1")
+    parser.add_argument("--include_qa", default="0")
     args = parser.parse_args(argv)
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -892,21 +1015,15 @@ def cli_main(argv: list[str] | None = None) -> int:
         )
         latest_pdf_path = (REPO_ROOT / "artifacts" / "prework_out" / "DecisionPack__LATEST.pdf")
 
-        verdict = f"D7_PDF=PASS OutputPdf={pdf_path} OutputLatestPdf={latest_pdf_path} Log={log_path}"
+        verdict = "D7_PDF=PASS SyntheticDecisionPackGenerated=1"
         write_text_log(
             log_path,
             [
                 f"Timestamp={datetime.now().isoformat(timespec='seconds')}",
-                f"RunContextPath={cli_ctx.get('source_path')}",
-                f"RunStamp={cli_ctx.get('stamp')}",
-                f"GitCommit={cli_ctx.get('git_commit')}",
-                f"Region={region}",
-                f"Mode={mode}",
+                f"Scope={PUBLIC_SCOPE_LABEL}",
                 f"Grain={grain}",
                 f"Period={period_arg}",
                 f"Station={station_arg}",
-                f"OutputPdf={pdf_path}",
-                f"OutputLatestPdf={latest_pdf_path}",
                 verdict,
             ],
         )
@@ -914,14 +1031,13 @@ def cli_main(argv: list[str] | None = None) -> int:
         return 0
     except Exception as e:
         err = re.sub(r"\s+", " ", f"{type(e).__name__}: {e}").strip()
-        verdict = f"D7_PDF=FAIL Error={err} Log={log_path}"
+        verdict = f"D7_PDF=FAIL Error={err}"
         try:
             write_text_log(
                 log_path,
                 [
                     f"Timestamp={datetime.now().isoformat(timespec='seconds')}",
-                    f"Region={getattr(args, 'region', '')}",
-                    f"Mode={getattr(args, 'mode', '')}",
+                    f"Scope={PUBLIC_SCOPE_LABEL}",
                     f"Grain={getattr(args, 'grain', '')}",
                     f"Period={getattr(args, 'period', '')}",
                     f"Station={getattr(args, 'station', '')}",
@@ -939,10 +1055,13 @@ if __name__ == "__main__" and not is_streamlit_runtime():
 
 
 if is_streamlit_runtime():
-    st.set_page_config(page_title="PDF Decision Pack Export", layout="wide")
+    st.set_page_config(page_title="Synthetic Decision Pack", layout="wide")
 
-    st.title("PDF Decision Pack Export")
-    st.caption("PASS-only PDF. Uses run_stamp + published CSVs. No DB calls.")
+    st.title("Synthetic Decision Pack")
+    st.caption(
+        "Public demo PDF using synthetic flight operations artifacts. "
+        "No employer data, real station figures, internal context, or company identity is present."
+    )
 
     ctx = st.session_state.get("mode_a_ctx")
     if not isinstance(ctx, dict):
@@ -956,39 +1075,23 @@ if is_streamlit_runtime():
     render_filter_banner(ctx, filters)
 
     run_stamp = ctx.get("run_stamp") if isinstance(ctx.get("run_stamp"), dict) else {}
-    ctx_source_path = ctx.get("source_path", "")
     region = str(ctx.get("region", "")).strip()
     mode = str(ctx.get("mode", "")).strip()
-    pass_stamp = ctx.get("stamp")
-    git_commit = ctx.get("git_commit")
-    git_branch = ctx.get("git_branch")
     required_files = ensure_list(ctx.get("required_files"))
-    ops_gate_pack_log_path = maybe_get(run_stamp, "ops_gate_pack_log_path", "OpsGatePackLogPath")
-    ops_gate_pack_stamp = maybe_get(run_stamp, "ops_gate_pack_stamp", "OpsGatePackStamp")
     insights_dir = Path(ctx.get("insights_dir", default_insights_dir()))
-    qa_summary_path = ctx.get("qa_path")
 
     if not region or not mode:
-        st.error("Run context is missing region/mode.")
+        st.error("Demo data context is unavailable.")
         st.stop()
 
-    with st.expander("📋 Pipeline Parameters", expanded=False):
-        prov_lines = [
-            f"run_context_path={ctx_source_path}",
-            f"stamp={pass_stamp}",
-            f"region={region}",
-            f"mode={mode}",
-            f"git_branch={git_branch}",
-            f"git_commit={git_commit}",
-            f"insights_dir={insights_dir}",
-            f"qa_summary_path={qa_summary_path}",
-            f"ops_gate_pack_stamp={ops_gate_pack_stamp}",
-            f"ops_gate_pack_log_path={ops_gate_pack_log_path}",
-        ]
-        st.code("\n".join([str(x) for x in prov_lines]), language="text")
+    with st.expander("Demo Data Contract", expanded=False):
+        contract_status = "available" if required_files else "not available"
+        st.write(f"Scope: {PUBLIC_SCOPE_LABEL}")
+        st.write(f"Contract: {contract_status}")
+        st.write(f"Registered artifacts: {len(required_files)}")
 
     if not required_files:
-        st.warning("run_stamp.required_files is missing/empty; generation may fail contract checks.")
+        st.warning("Demo data contract registry is unavailable; generation may fail contract checks.")
 
     grain = str(filters.get("grain", "Monthly"))
     periods_from_filters = [str(p) for p in filters.get("periods", []) if str(p).strip()]
@@ -998,10 +1101,10 @@ if is_streamlit_runtime():
     st.caption(f"Filters: Grain={grain} | Periods={period_summary} | Stations={station_summary}")
 
     t1, t2, t3, t4 = st.columns(4)
-    include_snapshot = bool(t1.toggle("Include Network Snapshot", value=True))
-    include_ranking = bool(t2.toggle("Include Station Ranking", value=True))
-    include_drivers = bool(t3.toggle("Include Drivers Summary", value=True))
-    include_qa = bool(t4.toggle("Include Coverage/QA excerpt", value=True))
+    include_snapshot = bool(t1.toggle("Include KPI Snapshot", value=True))
+    include_ranking = bool(t2.toggle("Include Station Review", value=True))
+    include_drivers = bool(t3.toggle("Include Delay Accountability", value=True))
+    include_qa = bool(t4.toggle("Include Technical Appendix", value=False))
 
     station_kpi_name = (
         f"2025_DEP_Monthly_Station_KPIs__{region}.csv"
@@ -1011,12 +1114,12 @@ if is_streamlit_runtime():
     artifacts_by_name = ctx.get("artifacts_by_name", {}) or {}
     _, station_kpi_path = resolve_required_file(required_files, station_kpi_name, insights_dir, artifacts_by_name)
     if not station_kpi_path.exists():
-        st.error(f"Missing Station KPI file: `{station_kpi_path}`")
+        st.error("Required synthetic Station KPI artifact is missing.")
         st.stop()
 
     station_kpi_df = load_csv(station_kpi_path)
     if station_kpi_df is None:
-        st.error(f"Could not load Station KPI file: `{station_kpi_path}`")
+        st.error("Could not load the synthetic Station KPI artifact.")
         st.stop()
     runtime_data_log(
         f"Grain={grain} StationKpisFile={station_kpi_path} Rows={len(station_kpi_df)} Cols={len(station_kpi_df.columns)}"
@@ -1089,22 +1192,16 @@ if is_streamlit_runtime():
                 log_path,
                 [
                     f"Timestamp={datetime.now().isoformat(timespec='seconds')}",
-                    f"RunContextPath={ctx_source_path}",
-                    f"RunStamp={pass_stamp}",
-                    f"GitCommit={git_commit}",
-                    f"Region={region}",
-                    f"Mode={mode}",
+                    f"Scope={PUBLIC_SCOPE_LABEL}",
                     f"Grain={grain}",
                     f"Period={period_selected}",
                     f"Station={station_selected}",
-                    f"OutputPdf={pdf_path}",
-                    f"OutputLatestPdf={latest_pdf_path}",
                 ],
             )
 
             st.session_state["decision_pack_pdf_bytes"] = pdf_bytes
-            st.session_state["decision_pack_pdf_name"] = pdf_path.name
-            st.success(f"PDF generated: `{pdf_path}`\n\nLATEST updated: `{latest_pdf_path}`\n\nRun log: `{log_path}`")
+            st.session_state["decision_pack_pdf_name"] = PUBLIC_PDF_FILENAME
+            st.success("Synthetic decision pack generated. Use the download button below.")
         except Exception as e:
             st.error(f"PDF generation failed: {type(e).__name__}: {e}")
 
@@ -1112,8 +1209,6 @@ if is_streamlit_runtime():
         st.download_button(
             label="Download PDF",
             data=st.session_state["decision_pack_pdf_bytes"],
-            file_name=st.session_state.get("decision_pack_pdf_name") or "DecisionPack.pdf",
+            file_name=st.session_state.get("decision_pack_pdf_name") or PUBLIC_PDF_FILENAME,
             mime="application/pdf",
         )
-
-
