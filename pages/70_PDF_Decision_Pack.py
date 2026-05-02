@@ -609,6 +609,13 @@ def _ground_ops_action_text(row: pd.Series) -> str:
     return "Review turnaround readiness pattern: boarding closure, ramp coordination, baggage delivery, load control readiness."
 
 
+def _demo_station_label(value: Any, mark: bool = True) -> str:
+    station = str(value).strip()
+    if not station or station.lower() == "nan":
+        return "not available"
+    return f"{station} demo station" if mark else station
+
+
 def _reason_route_for_category(category: Any) -> tuple[str, str]:
     label = _normalized_category_label(category)
     if "groundops" in label or label == "gops":
@@ -714,7 +721,7 @@ def build_ground_ops_impact_stations(station_metrics: pd.DataFrame, max_rows: in
     for _, r in d.iterrows():
         rows.append(
             {
-                "Station": r.get("Station"),
+                "Station": _demo_station_label(r.get("Station")),
                 "Flights": fmt_int(r.get("Flights")),
                 "OTP D15": _fmt_pct(r.get("OTP"), 1),
                 "GOPS min": fmt_int(r.get("GOPSMinutes")),
@@ -765,7 +772,7 @@ def build_network_kpi_summary(snapshot: dict[str, Any], station_metrics: pd.Data
         rows.append(
             {
                 "Metric": "Top station by Avg DEP Delay per Flight",
-                "Value": f"{top_station.get('Station')} | {fmt_float(top_station.get('AvgDelayMin'), 2)} min",
+                "Value": f"{_demo_station_label(top_station.get('Station'))} | {fmt_float(top_station.get('AvgDelayMin'), 2)} min",
                 "Note": _materiality_note(top_station.get("Flights")),
             }
         )
@@ -773,7 +780,7 @@ def build_network_kpi_summary(snapshot: dict[str, Any], station_metrics: pd.Data
         rows.append(
             {
                 "Metric": "Benchmark station by Avg DEP Delay per Flight",
-                "Value": f"{bench_station.get('Station')} | {fmt_float(bench_station.get('AvgDelayMin'), 2)} min",
+                "Value": f"{_demo_station_label(bench_station.get('Station'))} | {fmt_float(bench_station.get('AvgDelayMin'), 2)} min",
                 "Note": _materiality_note(bench_station.get("Flights")),
             }
         )
@@ -792,14 +799,14 @@ def build_station_ranking_snapshot(station_metrics: pd.DataFrame) -> pd.DataFram
     rows = [
         {
             "View": "Top station by Avg Delay",
-            "Station": top.get("Station"),
+            "Station": _demo_station_label(top.get("Station")),
             "Avg delay": fmt_float(top.get("AvgDelayMin"), 2),
             "Flights": fmt_int(top.get("Flights")),
             "Materiality note": _materiality_note(top.get("Flights")),
         },
         {
             "View": "Benchmark station by Avg Delay",
-            "Station": bench.get("Station"),
+            "Station": _demo_station_label(bench.get("Station")),
             "Avg delay": fmt_float(bench.get("AvgDelayMin"), 2),
             "Flights": fmt_int(bench.get("Flights")),
             "Materiality note": _materiality_note(bench.get("Flights")),
@@ -823,7 +830,7 @@ def build_executive_summary_matrix(
         if not g.empty:
             top_gops = g.iloc[0]
     if top_gops is not None:
-        pain_station = f"{top_gops.get('Station')} by Ground Ops minutes"
+        pain_station = f"{_demo_station_label(top_gops.get('Station'))} by Ground Ops minutes"
     else:
         ranked = build_station_ranking_snapshot(station_metrics)
         pain_station = str(ranked.iloc[0]["Station"]) + " by Avg DEP Delay with materiality caveat" if not ranked.empty else "not available"
@@ -854,7 +861,7 @@ def build_leadership_framing(
         ranked = station_metrics.dropna(subset=["AvgDelayMin"]).sort_values("AvgDelayMin", ascending=False)
         if not ranked.empty:
             top = ranked.iloc[0]
-            station_text = f"{top.get('Station')} has the highest average delay in the selected scope"
+            station_text = f"{_demo_station_label(top.get('Station'))} has the highest average delay in the selected scope"
     return [
         "Decision context: convert operational evidence into a review sequence.",
         f"OTP vs target and gap: {gap_text}.",
@@ -879,7 +886,7 @@ def build_action_lanes(
         if not d.empty:
             top_station = d.iloc[0]
             top_two = d.head(2)
-            parts = [f"{r.get('Station')} {fmt_int(r.get('GOPSMinutes'))} min" for _, r in top_two.iterrows()]
+            parts = [f"{_demo_station_label(r.get('Station'))} {fmt_int(r.get('GOPSMinutes'))} min" for _, r in top_two.iterrows()]
             gops_station_text = "; ".join(parts)
 
     if top_station is not None:
@@ -910,7 +917,7 @@ def build_action_lanes(
     station_focus = "Use local drilldown on the highest-priority demo station; avoid over-reading low-volume averages."
     if top_station is not None:
         station_evidence = (
-            f"{top_station.get('Station')} | flights {fmt_int(top_station.get('Flights'))} | "
+            f"{_demo_station_label(top_station.get('Station'))} | flights {fmt_int(top_station.get('Flights'))} | "
             f"avg delay {fmt_float(top_station.get('AvgDelayMin'), 2)} min | {_materiality_note(top_station.get('Flights'))}."
         )
     else:
@@ -967,7 +974,7 @@ def build_decision_impact(station_metrics: pd.DataFrame, accountability_df: pd.D
     top_station_value = "not available"
     scenario = "Ground Ops driver not available for scenario."
     if top_station is not None:
-        top_station_value = f"{top_station.get('Station')} | {fmt_int(top_station.get('GOPSMinutes'))} Ground Ops minutes"
+        top_station_value = f"{_demo_station_label(top_station.get('Station'))} | {fmt_int(top_station.get('GOPSMinutes'))} Ground Ops minutes"
         scenario_minutes = float(top_station.get("GOPSMinutes") or 0) * 0.15
         scenario = f"A 15% reduction in the top Ground Ops driver would remove {fmt_int(scenario_minutes)} minutes from the selected scope."
 
@@ -1173,6 +1180,10 @@ def build_pdf_bytes(
     card_title_style.fontSize = 10
     card_title_style.leading = 12
     card_title_style.textColor = colors.HexColor("#0B1220")
+    section_title_style = styles["Heading2"].clone("SectionTitle")
+    section_title_style.fontSize = 12
+    section_title_style.leading = 15
+    section_title_style.textColor = colors.HexColor("#0B1220")
 
     def _pdf_cell(value: Any, header: bool = False) -> Any:
         txt = "not available" if value is None or pd.isna(value) else str(value)
@@ -1197,7 +1208,7 @@ def build_pdf_bytes(
 
     def add_table_from_df(section_title: str, tdf: pd.DataFrame) -> None:
         if tdf.empty:
-            story.append(KeepTogether([Paragraph(section_title, styles["Heading2"]), Spacer(1, 6), Paragraph("Not available.", styles["Normal"]), Spacer(1, 10)]))
+            story.append(KeepTogether([Paragraph(section_title, section_title_style), Spacer(1, 6), Paragraph("Not available.", styles["Normal"]), Spacer(1, 10)]))
             return
         display = tdf.copy().fillna("not available")
         columns = [str(c) for c in display.columns]
@@ -1222,10 +1233,10 @@ def build_pdf_bytes(
                 ]
             )
         )
-        story.append(KeepTogether([Paragraph(section_title, styles["Heading2"]), Spacer(1, 6), tbl, Spacer(1, 10)]))
+        story.append(KeepTogether([Paragraph(section_title, section_title_style), Spacer(1, 6), tbl, Spacer(1, 10)]))
 
     def add_decision_impact(tdf: pd.DataFrame) -> None:
-        story.append(Paragraph("Decision Impact", styles["Heading2"]))
+        story.append(Paragraph("Decision Impact", section_title_style))
         story.append(Spacer(1, 6))
         rows = []
         for _, r in tdf.iterrows():
@@ -1254,7 +1265,7 @@ def build_pdf_bytes(
         story.append(KeepTogether([tbl, Spacer(1, 12)]))
 
     def add_action_lane_cards(tdf: pd.DataFrame) -> None:
-        story.append(Paragraph("Action Lanes", styles["Heading2"]))
+        story.append(Paragraph("Action Lanes", section_title_style))
         story.append(Spacer(1, 6))
         if tdf.empty:
             story.append(Paragraph("Not available.", styles["Normal"]))
@@ -1263,6 +1274,19 @@ def build_pdf_bytes(
         page_width = A4[0] - doc.leftMargin - doc.rightMargin
         for _, r in tdf.iterrows():
             lane_title = str(r.get("Lane", "Action lane"))
+            header = Table([[_pdf_cell(lane_title, header=True)]], colWidths=[page_width], hAlign="LEFT")
+            header.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#E8EEF7")),
+                        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#C9D4E5")),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                        ("TOPPADDING", (0, 0), (-1, -1), 5),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ]
+                )
+            )
             rows = [
                 [_pdf_cell("Reason", header=True), _pdf_cell(r.get("Operational reason"))],
                 [_pdf_cell("Action route", header=True), _pdf_cell(r.get("Action route"))],
@@ -1284,10 +1308,10 @@ def build_pdf_bytes(
                     ]
                 )
             )
-            story.append(KeepTogether([Paragraph(lane_title, card_title_style), Spacer(1, 3), tbl, Spacer(1, 8)]))
+            story.append(KeepTogether([header, tbl, Spacer(1, 8)]))
 
     def add_bullets(section_title: str, lines: list[str]) -> None:
-        story.append(Paragraph(section_title, styles["Heading2"]))
+        story.append(Paragraph(section_title, section_title_style))
         story.append(Spacer(1, 4))
         if not lines:
             story.append(Paragraph("Not available.", styles["Normal"]))
