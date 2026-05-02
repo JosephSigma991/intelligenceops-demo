@@ -14,7 +14,7 @@ from utils import (
 )
 
 
-st.set_page_config(page_title="DEP Intelligence | Mode A", layout="wide")
+st.set_page_config(page_title="IntelligenceOps | Synthetic Demo", layout="wide")
 
 def inject_premium_css() -> None:
     st.markdown(
@@ -496,10 +496,10 @@ def build_network_series(ts: pd.DataFrame, period_col: str, sort_col: str) -> pd
 inject_premium_css()
 
 st.info(
-    "**Live demo — synthetic data only.** "
-    "Architecture, design, and all code are production-identical. "
-    "Station codes, delay minutes, and OTP figures are computer-generated for demonstration purposes. "
-    "No real operational data is present in this deployment.",
+    "**Public demo — synthetic data only.**\n\n"
+    "This app demonstrates flight operations intelligence architecture, KPI governance, delay attribution, scenario design, and decision-pack workflow.\n\n"
+    "Station codes, delay minutes, OTP figures, trends, and scenario outputs are computer-generated.\n\n"
+    "No employer data, real station figures, internal context, or company identity is present.",
     icon="ℹ️",
 )
 
@@ -953,7 +953,7 @@ with st.container(border=True):
     col_h1, col_h2 = st.columns([6, 4])
     with col_h1:
         st.markdown("<div class='hero-title'>Departure Performance — Network Overview</div>", unsafe_allow_html=True)
-        st.markdown("<div class='hero-subtitle'>East Africa &amp; Turkey · Operated flights · Positive delays only</div>", unsafe_allow_html=True)
+        st.markdown("<div class='hero-subtitle'>Synthetic network · Demonstration flights · Positive delays only</div>", unsafe_allow_html=True)
     with col_h2:
         st.markdown(
             (
@@ -1241,4 +1241,3 @@ with st.expander("Delay Code Analysis", expanded=False):
                         style_plotly_card(fig_codes_ground, title="Top Delay Codes (Top 5, Ground Ops)", height=420)
                         fig_codes_ground.update_yaxes(autorange="reversed")
                         show_plotly(fig_codes_ground, key="p1_network__top_delay_codes_top5_ground_ops")
-

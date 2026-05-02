@@ -1,12 +1,10 @@
 # IntelligenceOps
 
-**Production-grade departure performance analytics platform for airline operations.**
+**Synthetic public demo of a flight operations intelligence system for airline decision support.**
 
-> **This is a public demo deployment.** All data is synthetic — station codes, delay minutes, and OTP figures are computer-generated. No real operational data is present. Architecture, design, and all application code are production-identical.
+> **This is a public synthetic demo.** Station codes, delay minutes, OTP figures, trends, and scenario outputs are computer-generated for demonstration. No employer data, real station figures, internal context, or company identity is present. The demo reflects the architecture, methodology, KPI governance, and decision workflow behind the system without exposing operational data.
 
 IntelligenceOps processes raw flight and delay data from SQL Server through a validated ETL pipeline, publishes contract-verified CSV artifacts, and renders them as an interactive multi-page dashboard with executive PDF export capability. The system covers OTP D15 tracking, delay root cause analysis, station ranking, what-if scenario modeling, and data quality monitoring, all built against IATA delay accountability standards.
-
-Currently deployed for a regional airline's East Africa and Turkey network (6 stations), with architecture designed for multi-region, multi-mode extensibility.
 
 ---
 
