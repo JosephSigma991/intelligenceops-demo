@@ -553,7 +553,7 @@ def build_executive_findings(
     if drivers_df is not None and not drivers_df.empty:
         top = drivers_df.iloc[0]
         findings.append(
-            f"Top delay category in the selected synthetic scope is {top.get('DelayCategory')} "
+            f"Top delay category in the selected scope is {top.get('DelayCategory')} "
             f"at {fmt_float(top.get('SharePct'), 1)}% of category minutes."
         )
 
@@ -563,7 +563,7 @@ def build_executive_findings(
         findings.append(f"Controllable categories represent {fmt_float(ctrl_share, 1)}% of categorized delay minutes.")
 
     if station_df is not None and not station_df.empty:
-        findings.append("Station review ranks synthetic stations by average departure delay for follow-up prioritization.")
+        findings.append("Station review ranks demo stations by average departure delay for follow-up prioritization.")
 
     return findings[:4]
 
@@ -581,7 +581,40 @@ def _materiality_note(flights: Any) -> str:
         return "flight volume not available"
     if f < 30:
         return "materiality caveat: low flight volume may distort average delay"
-    return "sufficient synthetic volume for review"
+    return "sufficient demo volume for review"
+
+
+def _reason_route_for_category(category: Any) -> tuple[str, str]:
+    label = _normalized_category_label(category)
+    if "groundops" in label or label == "gops":
+        return (
+            "boarding/ramp/load-control readiness pattern",
+            "Station Manager / GHA with Area Manager follow-up",
+        )
+    if "latearrival" in label or "reactionary" in label or "inherited" in label or "lateaircraft" in label or "lateacft" in label:
+        return (
+            "aircraft rotation protection and knock-on delay containment",
+            "OCC / Network Control with cross-functional governance review",
+        )
+    if "occ" in label:
+        return (
+            "recovery decision timing and network coordination",
+            "OCC / Network Control",
+        )
+    if "engineering" in label or "maintenance" in label:
+        return (
+            "aircraft readiness and defect recovery coordination",
+            "Maintenance Control with turnaround coordinator",
+        )
+    if "atc" in label or "weather" in label:
+        return (
+            "external constraint protection and passenger/crew communication timing",
+            "OCC / Network Control with station communication support",
+        )
+    return (
+        "local review required before assigning accountability",
+        "Cross-functional governance review",
+    )
 
 
 def _station_metric_frame(period_df: pd.DataFrame, mapping: dict[str, str | None]) -> pd.DataFrame:
@@ -683,7 +716,7 @@ def build_delay_context_indicators(accountability_df: pd.DataFrame) -> pd.DataFr
                 "Indicator": label,
                 "Minutes": fmt_int(minutes),
                 "Share": _fmt_pct(share, 1),
-                "Basis": "selected-scope synthetic evidence",
+                "Basis": "selected-scope evidence from demo data",
             }
         )
     return pd.DataFrame(rows)
@@ -699,7 +732,7 @@ def build_network_kpi_summary(snapshot: dict[str, Any], station_metrics: pd.Data
             bench_station = d.sort_values("AvgDelayMin", ascending=True).iloc[0]
 
     rows = [
-        {"Metric": "Flights operated", "Value": fmt_int(snapshot.get("Flights")), "Note": "selected synthetic scope"},
+        {"Metric": "Flights operated", "Value": fmt_int(snapshot.get("Flights")), "Note": "selected scope"},
         {"Metric": "Avg DEP Delay per Flight", "Value": fmt_float(snapshot.get("AvgDelay"), 2), "Note": str(snapshot.get("AvgDelayBasis", "computed from selected scope"))},
         {"Metric": "DEP OTP D15", "Value": _fmt_pct(snapshot.get("OTP"), 1), "Note": "target benchmark 85.0%"},
     ]
@@ -771,7 +804,7 @@ def build_executive_summary_matrix(
         pain_station = str(ranked.iloc[0]["Station"]) + " by Avg DEP Delay with materiality caveat" if not ranked.empty else "not available"
 
     rows = [
-        {"Signal": "OTP D15", "Value": _fmt_pct(otp, 1), "Decision use": "selected synthetic scope"},
+        {"Signal": "OTP D15", "Value": _fmt_pct(otp, 1), "Decision use": "selected scope"},
         {"Signal": "Target", "Value": "85.0%", "Decision use": "demo target benchmark"},
         {"Signal": "Target gap", "Value": "not available" if gap is None else f"{gap:+.1f} pts", "Decision use": "positive means above target"},
         {"Signal": "Flights operated", "Value": fmt_int(snapshot.get("Flights")), "Decision use": "materiality context"},
@@ -796,22 +829,22 @@ def build_leadership_framing(
         ranked = station_metrics.dropna(subset=["AvgDelayMin"]).sort_values("AvgDelayMin", ascending=False)
         if not ranked.empty:
             top = ranked.iloc[0]
-            station_text = f"{top.get('Station')} has the highest average delay in the selected synthetic scope"
+            station_text = f"{top.get('Station')} has the highest average delay in the selected scope"
     return [
-        "Decision context: convert synthetic operational evidence into a review sequence.",
+        "Decision context: convert operational evidence into a review sequence.",
         f"OTP vs target and gap: {gap_text}.",
         f"Headline operational pain: {station_text}; {bucket_text}.",
         f"Action focus: {action_focus}",
-        "Synthetic data note: all figures are computer-generated for public demonstration.",
+        "Data note: figures are from the public demo dataset.",
     ]
 
 
 def build_action_lanes(
     station_metrics: pd.DataFrame,
     accountability_df: pd.DataFrame,
-    top_code_lookup: dict[str, str],
+    top_code_lookup: dict[str, dict[str, str]],
 ) -> pd.DataFrame:
-    lane_cols = ["Lane", "Evidence", "Review focus"]
+    lane_cols = ["Lane", "Operational reason", "Action route", "Evidence", "Decision"]
     gops_station_text = "Ground Ops station evidence not available"
     top_station = None
     if station_metrics is not None and not station_metrics.empty:
@@ -826,11 +859,11 @@ def build_action_lanes(
 
     if top_station is not None:
         station_key = str(top_station.get("Station"))
-        code = top_code_lookup.get(station_key)
+        code = top_code_lookup.get("ground_ops", {}).get(station_key)
         if code:
-            gops_focus = f"Review highest-impact synthetic station; start with code {code} as a public demo drilldown."
+            gops_focus = f"Start with local turnaround readiness review using Ground Ops code {code}, not network-level escalation."
         else:
-            gops_focus = "Review highest-impact synthetic station; start with selected-scope category drilldown."
+            gops_focus = "Start with local turnaround readiness review using selected-scope category drilldown."
     else:
         gops_focus = "Start with selected-scope category drilldown."
 
@@ -843,71 +876,128 @@ def build_action_lanes(
         inherited_focus = "Protect reactionary/inherited risk before narrowing Ground Ops accountability."
     else:
         inherited_focus = "Keep inherited/reactionary context visible while reviewing controllable levers."
-    inherited_evidence = f"Inherited / reactionary {fmt_int(inherited_minutes)} min; largest bucket {largest[0] if largest else 'not available'}."
+    reactionary_code = None
+    if top_station is not None:
+        reactionary_code = top_code_lookup.get("reactionary", {}).get(str(top_station.get("Station")))
+    reactionary_note = f"; start with reactionary code {reactionary_code}" if reactionary_code else ""
+    inherited_evidence = f"Inherited / reactionary {fmt_int(inherited_minutes)} min; largest bucket {largest[0] if largest else 'not available'}{reactionary_note}."
 
-    station_focus = "Use local drilldown on the highest-priority synthetic station; avoid over-reading low-volume averages."
+    station_focus = "Use local drilldown on the highest-priority demo station; avoid over-reading low-volume averages."
     if top_station is not None:
         station_evidence = (
             f"{top_station.get('Station')} | flights {fmt_int(top_station.get('Flights'))} | "
             f"avg delay {fmt_float(top_station.get('AvgDelayMin'), 2)} min | {_materiality_note(top_station.get('Flights'))}."
         )
     else:
-        station_evidence = "Station priority not available for the selected synthetic scope."
+        station_evidence = "Station priority not available for the selected scope."
 
+    gops_reason, gops_route = _reason_route_for_category("Ground Ops")
+    reactionary_reason, reactionary_route = _reason_route_for_category("Late Arrival")
+    local_reason, local_route = _reason_route_for_category("Other")
     rows = [
         {
-            "Lane": "A) Ground Ops controllable delay",
+            "Lane": "Ground Ops controllable delay",
+            "Operational reason": gops_reason,
+            "Action route": gops_route,
             "Evidence": gops_station_text,
-            "Review focus": gops_focus,
+            "Decision": gops_focus,
         },
         {
-            "Lane": "B) Reactionary / inherited delay protection",
+            "Lane": "Reactionary / inherited delay protection",
+            "Operational reason": reactionary_reason,
+            "Action route": reactionary_route,
             "Evidence": inherited_evidence,
-            "Review focus": inherited_focus,
+            "Decision": inherited_focus,
         },
         {
-            "Lane": "C) Station follow-up / local drilldown",
+            "Lane": "Station follow-up / local drilldown",
+            "Operational reason": local_reason,
+            "Action route": local_route,
             "Evidence": station_evidence,
-            "Review focus": station_focus,
+            "Decision": station_focus,
         },
         {
-            "Lane": "D) TAT layer",
-            "Evidence": "TAT layer is not included in this public synthetic demo.",
-            "Review focus": "In the full methodology, TAT is used as a turnaround execution risk layer.",
+            "Lane": "TAT layer",
+            "Operational reason": "turnaround execution risk layer",
+            "Action route": "Turnaround coordinator",
+            "Evidence": "TAT layer is not included in this public demo.",
+            "Decision": "In the full methodology, TAT is used as a turnaround execution risk layer.",
         },
     ]
     return pd.DataFrame(rows, columns=lane_cols)
 
 
-def build_top_code_lookup(top_codes_df: pd.DataFrame | None) -> dict[str, str]:
+def build_decision_impact(station_metrics: pd.DataFrame, accountability_df: pd.DataFrame) -> pd.DataFrame:
+    cols = ["Signal", "Value", "Decision interpretation"]
+    ground_minutes = _accountability_value(accountability_df, "Controllable - Ground Ops", "Minutes") or 0.0
+    other_ctrl_minutes = _accountability_value(accountability_df, "Controllable - Other categories", "Minutes") or 0.0
+    if ground_minutes >= other_ctrl_minutes:
+        top_bucket = "Ground Ops controllable delay"
+        exposed_minutes = ground_minutes
+    else:
+        top_bucket = "Other controllable categories"
+        exposed_minutes = other_ctrl_minutes
+
+    top_station = None
+    if station_metrics is not None and not station_metrics.empty:
+        d = station_metrics.copy()
+        d["GOPSMinutes"] = pd.to_numeric(d.get("GOPSMinutes"), errors="coerce").fillna(0)
+        d = d[d["GOPSMinutes"] > 0].sort_values("GOPSMinutes", ascending=False)
+        if not d.empty:
+            top_station = d.iloc[0]
+
+    top_station_value = "not available"
+    scenario = "Ground Ops driver not available for scenario."
+    if top_station is not None:
+        top_station_value = f"{top_station.get('Station')} | {fmt_int(top_station.get('GOPSMinutes'))} Ground Ops minutes"
+        scenario_minutes = float(top_station.get("GOPSMinutes") or 0) * 0.15
+        scenario = f"A 15% reduction in the top Ground Ops driver would remove {fmt_int(scenario_minutes)} minutes from the selected scope."
+
+    rows = [
+        {"Signal": "Top controllable bucket", "Value": top_bucket, "Decision interpretation": "Start where controllable exposure is largest."},
+        {"Signal": "Top station", "Value": top_station_value, "Decision interpretation": "Use station evidence before escalating network action."},
+        {"Signal": "Minutes exposed", "Value": fmt_int(exposed_minutes), "Decision interpretation": "Magnitude of selected-scope controllable exposure."},
+        {"Signal": "Simple improvement scenario", "Value": scenario, "Decision interpretation": "Minutes-only scenario; no OTP lift is claimed."},
+    ]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def build_top_code_lookup(top_codes_df: pd.DataFrame | None) -> dict[str, dict[str, str]]:
     if top_codes_df is None or top_codes_df.empty:
-        return {}
+        return {"ground_ops": {}, "reactionary": {}}
     station_col = pick_column(top_codes_df, STATION_CANDIDATES, token_groups=[["station"]])
     code_col = pick_column(top_codes_df, ["DelayCode", "Delay Code", "Code"], token_groups=[["code"]])
+    category_col = pick_column(top_codes_df, CATEGORY_CANDIDATES, token_groups=[["category"]])
     minutes_col = pick_column(top_codes_df, MINUTES_CANDIDATES, token_groups=[["min"]])
-    if station_col is None or code_col is None:
-        return {}
+    if station_col is None or code_col is None or category_col is None:
+        return {"ground_ops": {}, "reactionary": {}}
     d = top_codes_df.copy()
     if minutes_col is not None:
         d["_minutes"] = pd.to_numeric(d[minutes_col], errors="coerce").fillna(0)
         d = d.sort_values("_minutes", ascending=False)
-    out: dict[str, str] = {}
-    for station, g in d.groupby(station_col):
+    d["_bucket"] = d[category_col].map(_delay_bucket)
+    out: dict[str, dict[str, str]] = {"ground_ops": {}, "reactionary": {}}
+    for station, g in d[d["_bucket"] == "Controllable - Ground Ops"].groupby(station_col):
         if g.empty:
             continue
         code = str(g.iloc[0][code_col]).strip()
         if code:
-            out[str(station)] = code
+            out["ground_ops"][str(station)] = code
+    for station, g in d[d["_bucket"] == "Inherited / reactionary"].groupby(station_col):
+        if g.empty:
+            continue
+        code = str(g.iloc[0][code_col]).strip()
+        if code:
+            out["reactionary"][str(station)] = code
     return out
 
 
 def build_confidence_caveats(include_appendix: bool) -> list[str]:
     appendix_state = "enabled" if include_appendix else "available only when enabled"
     return [
-        "Evidence basis: selected-scope synthetic artifacts.",
-        "This public demo uses synthetic data only.",
+        "Evidence basis: selected-scope evidence from demo data.",
+        "This public decision pack uses demo data. It demonstrates method, governance, and decision routing. It does not contain employer data, real station figures, internal context, or company identity.",
         "Delay Category / Owner basis: DelayCategory.",
-        "No employer data, real station figures, internal context, or company identity is present.",
         f"Technical appendix is {appendix_state}.",
     ]
 
@@ -1012,6 +1102,7 @@ def build_pdf_bytes(
     station_selected: str,
     executive_matrix_df: pd.DataFrame,
     leadership_framing: list[str],
+    decision_impact_df: pd.DataFrame,
     action_lanes_df: pd.DataFrame,
     ground_ops_stations_df: pd.DataFrame,
     delay_context_df: pd.DataFrame,
@@ -1134,6 +1225,7 @@ def build_pdf_bytes(
 
     add_table_from_df("Executive Summary", executive_matrix_df)
     add_bullets("Leadership Framing", leadership_framing)
+    add_table_from_df("Decision Impact", decision_impact_df)
     add_table_from_df("Action Lanes", action_lanes_df)
 
     if otp_chart_png is not None:
@@ -1284,9 +1376,10 @@ def export_decision_pack_pdf(
     qa_df = load_csv(qa_summary_path) if (include_qa and qa_summary_path is not None and qa_summary_path.exists()) else None
     appendix_df = build_sanitized_appendix(required_files, station_kpi_df, delay_minutes_df, qa_df)
     top_code_lookup = build_top_code_lookup(top_codes_df)
-    action_focus = "Review the highest-impact synthetic station using selected-scope Ground Ops and delay-category evidence."
+    action_focus = "Review the highest-impact demo station using selected-scope Ground Ops and delay-category evidence."
     executive_matrix_df = build_executive_summary_matrix(snapshot, station_metrics, action_focus)
     leadership_framing = build_leadership_framing(snapshot, station_metrics, accountability_df, action_focus)
+    decision_impact_df = build_decision_impact(station_metrics, accountability_df)
     action_lanes_df = build_action_lanes(station_metrics, accountability_df, top_code_lookup)
     ground_ops_stations_df = build_ground_ops_impact_stations(station_metrics)
     delay_context_df = build_delay_context_indicators(accountability_df)
@@ -1309,6 +1402,7 @@ def export_decision_pack_pdf(
         station_selected=station_selected,
         executive_matrix_df=executive_matrix_df,
         leadership_framing=leadership_framing,
+        decision_impact_df=decision_impact_df,
         action_lanes_df=action_lanes_df,
         ground_ops_stations_df=ground_ops_stations_df,
         delay_context_df=delay_context_df,
