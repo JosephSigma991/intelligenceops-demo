@@ -248,7 +248,7 @@ with tab_kpi:
 
     st.subheader("Governance Notes")
     st.markdown("- **Owner = DelayCategory** — single accountability basis. No separate Owner axis.")
-    st.markdown("- **POSONLY mode** — only positive delays (>0 min) are included in all KPI computations.")
+    st.markdown("- **Positive-delay mode** — only positive delays (>0 min) are included in all KPI computations.")
     st.markdown("- **OTP D15 target: 85 %** — departures ≤ 15 min late count as on-time.")
     st.markdown("- **Aerops exports use UTC timestamps** — no timezone conversion required.")
     st.markdown("- **Grain safety** — never use annual-only driver/category data for monthly or weekly views.")

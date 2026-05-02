@@ -210,7 +210,7 @@ def get_or_select_run_context(st, insights_dir: Path) -> dict[str, Any]:
                 break
     else:
         for i, r in enumerate(run_stamps):
-            if str(r["region"]).upper() == "EAT7":
+            if str(r["region"]).upper() == "DEMO":
                 default_idx = i
                 break
 

@@ -71,7 +71,7 @@ Streamlit Dashboard (8 pages)          PDF Decision Pack (ReportLab + Kaleido)
 
 **Owner = Delay Category.** A deliberate simplification for an operations accountability dashboard. Delay categories map to IATA owner groups. A separate Owner dimension was evaluated and rejected because it would confuse accountability conversations.
 
-**POSONLY mode.** Only positive delays are analyzed. This is the industry-standard approach for departure delay reporting, aligned with how IATA OTP D15 works.
+**Positive-delay mode.** Only positive delays are analyzed. This is the industry-standard approach for departure delay reporting, aligned with how IATA OTP D15 works.
 
 **Frozen KPI definitions.** Four core calculations are locked and cannot be changed without explicit sign-off: AvgDepDelayMin_PerFlight, OTP_D15_Pct, Controllable_Min_NORM_Total, Minutes_NORM_to_DepDelayMin.
 
@@ -81,7 +81,7 @@ Streamlit Dashboard (8 pages)          PDF Decision Pack (ReportLab + Kaleido)
 
 ## Data Contract
 
-7 required CSV files in the demo deployment (full production contract: 13 files):
+7 required CSV files in the demo deployment (full architecture contract: 13 files):
 
 - 2x Station KPIs (Monthly + Weekly)
 - 3x Delay Category Minutes (Annual + Monthly + Weekly)

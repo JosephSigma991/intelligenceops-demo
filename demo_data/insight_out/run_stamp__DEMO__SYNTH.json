@@ -1,0 +1,19 @@
+{
+    "stamp": "20260318_120000",
+    "region": "DEMO",
+    "scope": "DEMO",
+    "mode": "SYNTH",
+    "git_branch": "main",
+    "git_commit": "0000000000000000000000000000000000000000",
+    "insights_dir": "demo_data/insight_out",
+    "required_files": [
+        "2025_DEP_Monthly_Station_KPIs__DEMO.csv",
+        "2025_DEP_Weekly_Station_KPIs__DEMO.csv",
+        "2025_DEP_Owner_Minutes__DEMO_NORM.csv",
+        "2025_DEP_TopDelayCodes__DEMO_NORM.csv",
+        "2025_DEP_DelayCategory_Minutes__DEMO_NORM.csv",
+        "2025_DEP_DelayCategory_Minutes__DEMO_NORM__MONTHLY.csv",
+        "2025_DEP_DelayCategory_Minutes__DEMO_NORM__WEEKLY.csv"
+    ],
+    "qa_summary_path": "demo_data/insight_out/qa_summary__DEMO__SYNTH__20260318_120000.csv"
+}
