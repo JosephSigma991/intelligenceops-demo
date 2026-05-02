@@ -305,6 +305,68 @@ def safe_filter_station(df: pd.DataFrame, stations_sel: list[str]) -> pd.DataFra
         return df.iloc[0:0].copy()
     return df[station_key_series(df[st_col]).isin(sel_keys)].copy()
 
+def compute_controllable_category_split(
+    cat_df: pd.DataFrame,
+    cat_col: str | None,
+    cat_min_col: str | None,
+    ts_period: pd.DataFrame,
+    cont_col: str | None,
+    gops_col: str | None,
+) -> tuple[float, float, str | None]:
+    if (
+        cat_col
+        and cat_min_col
+        and cat_col in cat_df.columns
+        and cat_min_col in cat_df.columns
+        and not cat_df.empty
+    ):
+        labels = cat_df[cat_col].astype(str).str.strip()
+        labels_low = labels.str.lower()
+        labels_norm = labels_low.str.replace(r"[^a-z0-9]+", "", regex=True)
+        minutes = to_num(cat_df[cat_min_col]).fillna(0.0).clip(lower=0.0)
+
+        ground_mask = (
+            (labels_low.str.contains("ground", na=False) & labels_low.str.contains("ops", na=False))
+            | labels_norm.str.contains("gops", na=False)
+        )
+        non_controllable_mask = (
+            (labels_low.str.contains("late", na=False) & labels_low.str.contains("arrival", na=False))
+            | labels_norm.str.contains("reactionary", na=False)
+            | labels_norm.str.contains("inherited", na=False)
+            | labels_norm.str.contains("lateacft", na=False)
+            | labels_norm.str.contains("lateaircraft", na=False)
+            | labels_norm.str.contains("atc", na=False)
+            | labels_norm.str.contains("weather", na=False)
+            | labels_norm.str.contains("airport", na=False)
+            | labels_norm.str.contains("uncontrollable", na=False)
+        )
+        controllable_mask = ~non_controllable_mask
+
+        ground_ops = float(minutes.loc[controllable_mask & ground_mask].sum())
+        other_controllable = float(minutes.loc[controllable_mask & ~ground_mask].sum())
+        return max(ground_ops, 0.0), max(other_controllable, 0.0), None
+
+    if ts_period is None or ts_period.empty:
+        return 0.0, 0.0, None
+
+    controllable = (
+        float(to_num(ts_period[cont_col]).fillna(0.0).clip(lower=0.0).sum())
+        if cont_col and cont_col in ts_period.columns
+        else 0.0
+    )
+    ground_ops = (
+        float(to_num(ts_period[gops_col]).fillna(0.0).clip(lower=0.0).sum())
+        if gops_col and gops_col in ts_period.columns
+        else 0.0
+    )
+    warning = None
+    if ground_ops > controllable + 1e-9:
+        warning = (
+            "Ground Ops minutes exceed controllable minutes in the selected synthetic KPI scope; "
+            "showing the raw split without masking the contract mismatch."
+        )
+    return max(ground_ops, 0.0), max(controllable - ground_ops, 0.0), warning
+
 def available_periods(ts: pd.DataFrame, period_col: str, sort_col: str, stations: list[str]) -> list[str]:
     station_keys = {str(v).strip().upper() for v in stations if str(v).strip()}
     d = ts[station_key_series(ts["Station"]).isin(station_keys)].copy()
@@ -912,16 +974,14 @@ def fmt_pct1_or_na(x: float) -> str:
         return "N/A"
     return f"{float(x):.1f}%"
 
-if cat_supports_selected_grain:
-    ground_ops_controllable = float(cat_df.loc[ground_mask & ~late_mask, cat_min_col].sum()) if not cat_df.empty else 0.0
-    controllable_total_for_split = float(cur_controllable) if cur_controllable > 0 else float(cat_df.loc[~late_mask, cat_min_col].sum())
-    ground_ops_controllable = min(max(ground_ops_controllable, 0.0), max(controllable_total_for_split, 0.0))
-    other_controllable_minutes = max(controllable_total_for_split - ground_ops_controllable, 0.0)
-else:
-    controllable_total_for_split = float(cur_controllable) if cur_controllable > 0 else float(station_metrics["Controllable Minutes"].sum())
-    gops_total_for_split = float(station_metrics["Ground Ops Minutes"].sum())
-    ground_ops_controllable = min(max(gops_total_for_split, 0.0), max(controllable_total_for_split, 0.0))
-    other_controllable_minutes = max(controllable_total_for_split - ground_ops_controllable, 0.0)
+ground_ops_controllable, other_controllable_minutes, controllable_split_warning = compute_controllable_category_split(
+    cat_df if cat_supports_selected_grain else cat_df.iloc[0:0],
+    cat_col if cat_supports_selected_grain else None,
+    cat_min_col if cat_supports_selected_grain else None,
+    ts_period,
+    cont_station_col,
+    gops_station_col,
+)
 
 flights_series = net["Flights_Operated"].astype(float).tolist() if "Flights_Operated" in net.columns else None
 otp_series = net["OTP"].astype(float).tolist() if "OTP" in net.columns else None
@@ -1109,50 +1169,59 @@ with right_col:
         own_vals = [ground_ops_controllable, other_controllable_minutes]
         own_total = sum(own_vals)
         own_pct = [(v / own_total * 100.0) if own_total > 0 else 0.0 for v in own_vals]
-        fig_own = go.Figure(go.Pie(
-            labels=own_labels,
-            values=own_vals,
-            hole=0.62,
-            sort=False,
-            textinfo="percent",
-            textposition="inside",
-            insidetextorientation="horizontal",
-            textfont=dict(color="#0B1220", size=12),
-            marker=dict(colors=["#4F46E5", "#E2E8F0"]),
-            hovertemplate="%{label}<br>%{value:,.0f} min<br>%{percent}<extra></extra>",
-        ))
-        fig_own.add_annotation(
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            text=f"Controllable<br><b>{own_total:,.0f} min</b>",
-            font=dict(color="#0B1220", size=15, family="Inter, Arial, sans-serif"),
-            align="center",
-        )
-        style_plotly_card(fig_own, title="Controllable Delays — Category Split", height=300, margin=dict(l=10, r=10, t=52, b=92))
-        fig_own.update_layout(
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                x=0,
-                y=-0.05,
-                xanchor="left",
-                yanchor="top",
-                font=dict(color="#0B1220", size=12, family="Inter, Arial, sans-serif"),
-                itemwidth=40,
-            ),
-            uniformtext_minsize=12,
-            uniformtext_mode="hide",
-        )
-        show_plotly(fig_own, key="p1_network__controllable_ownership")
-        st.markdown(
-            f"<div class='card-note'>Ground Ops: {fmt_int(own_vals[0])} min ({own_pct[0]:.1f}%)<br>Other Categories: {fmt_int(own_vals[1])} min ({own_pct[1]:.1f}%)</div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            "<span class='decision-pill'>Decision: Prioritize levers where Ground Ops share is highest.</span>",
-            unsafe_allow_html=True,
-        )
+        if own_total <= 0:
+            st.markdown("<div class='kpi-label' style='font-size:14px;'>Controllable Delays — Category Split</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='card-note'>No controllable category minutes available for the current selection.</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            fig_own = go.Figure(go.Pie(
+                labels=own_labels,
+                values=own_vals,
+                hole=0.62,
+                sort=False,
+                textinfo="percent",
+                textposition="inside",
+                insidetextorientation="horizontal",
+                textfont=dict(color="#0B1220", size=12),
+                marker=dict(colors=["#4F46E5", "#E2E8F0"]),
+                hovertemplate="%{label}<br>%{value:,.0f} min<br>%{percent}<extra></extra>",
+            ))
+            fig_own.add_annotation(
+                x=0.5,
+                y=0.5,
+                showarrow=False,
+                text=f"Controllable<br><b>{own_total:,.0f} min</b>",
+                font=dict(color="#0B1220", size=15, family="Inter, Arial, sans-serif"),
+                align="center",
+            )
+            style_plotly_card(fig_own, title="Controllable Delays — Category Split", height=300, margin=dict(l=10, r=10, t=52, b=92))
+            fig_own.update_layout(
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    x=0,
+                    y=-0.05,
+                    xanchor="left",
+                    yanchor="top",
+                    font=dict(color="#0B1220", size=12, family="Inter, Arial, sans-serif"),
+                    itemwidth=40,
+                ),
+                uniformtext_minsize=12,
+                uniformtext_mode="hide",
+            )
+            show_plotly(fig_own, key="p1_network__controllable_ownership")
+            st.markdown(
+                f"<div class='card-note'>Ground Ops: {fmt_int(own_vals[0])} min ({own_pct[0]:.1f}%)<br>Other Categories: {fmt_int(own_vals[1])} min ({own_pct[1]:.1f}%)</div>",
+                unsafe_allow_html=True,
+            )
+            if controllable_split_warning:
+                st.warning(controllable_split_warning)
+            st.markdown(
+                "<span class='decision-pill'>Decision: Prioritize levers where Ground Ops share is highest.</span>",
+                unsafe_allow_html=True,
+            )
 
 st.divider()
 st.markdown(
