@@ -568,6 +568,350 @@ def build_executive_findings(
     return findings[:4]
 
 
+def _fmt_pct(v: Any, digits: int = 1) -> str:
+    if v is None or pd.isna(v):
+        return "not available"
+    return f"{float(v):,.{digits}f}%"
+
+
+def _materiality_note(flights: Any) -> str:
+    try:
+        f = float(flights)
+    except Exception:
+        return "flight volume not available"
+    if f < 30:
+        return "materiality caveat: low flight volume may distort average delay"
+    return "sufficient synthetic volume for review"
+
+
+def _station_metric_frame(period_df: pd.DataFrame, mapping: dict[str, str | None]) -> pd.DataFrame:
+    station_col = mapping["station"]
+    flights_col = mapping["flights"]
+    total_col = mapping["total"]
+    avg_col = mapping["avg"]
+    otp_col = mapping["otp"]
+    if station_col is None or flights_col is None:
+        return pd.DataFrame()
+
+    gops_col = pick_column(period_df, ["GOPS_Min_NORM_Total", "GOPS_Min_NORM", "GroundOps_Min_NORM_Total"], token_groups=[["gops"], ["min"]])
+    cont_col = pick_column(period_df, ["Controllable_Min_NORM_Total", "Controllable_Min_NORM"], token_groups=[["controllable"], ["min"]])
+    inherited_col = pick_column(period_df, ["Reactionary_Min_NORM_Total", "Inherited_Min_NORM_Total"], token_groups=[["reactionary"], ["min"]])
+
+    rows: list[dict[str, Any]] = []
+    for station, g in period_df.groupby(station_col):
+        flights = float(pd.to_numeric(g[flights_col], errors="coerce").fillna(0).sum())
+        if flights <= 0:
+            continue
+        total = float(pd.to_numeric(g[total_col], errors="coerce").fillna(0).sum()) if total_col else None
+        gops = float(pd.to_numeric(g[gops_col], errors="coerce").fillna(0).sum()) if gops_col else None
+        controllable = float(pd.to_numeric(g[cont_col], errors="coerce").fillna(0).sum()) if cont_col else None
+        inherited = float(pd.to_numeric(g[inherited_col], errors="coerce").fillna(0).sum()) if inherited_col else None
+        avg_delay = (total / flights) if total is not None and flights > 0 else weighted_avg(g[avg_col], g[flights_col]) if avg_col else None
+        otp = weighted_avg(g[otp_col], g[flights_col]) if otp_col else None
+        rows.append(
+            {
+                "Station": str(station),
+                "Flights": flights,
+                "OTP": otp,
+                "AvgDelayMin": avg_delay,
+                "TotalMinutes": total,
+                "GOPSMinutes": gops,
+                "ControllableMinutes": controllable,
+                "InheritedMinutes": inherited,
+                "GOPSSharePct": (gops / total * 100.0) if gops is not None and total and total > 0 else None,
+                "GOPSAvgPerFlight": (gops / flights) if gops is not None and flights > 0 else None,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _accountability_value(accountability_df: pd.DataFrame, bucket: str, col: str = "Minutes") -> float | None:
+    if accountability_df is None or accountability_df.empty or col not in accountability_df.columns:
+        return None
+    m = accountability_df[accountability_df["Bucket"].astype(str) == bucket]
+    if m.empty:
+        return 0.0
+    return float(pd.to_numeric(m[col], errors="coerce").fillna(0).sum())
+
+
+def _largest_bucket(accountability_df: pd.DataFrame) -> tuple[str, float] | None:
+    if accountability_df is None or accountability_df.empty:
+        return None
+    d = accountability_df.copy()
+    d["Minutes"] = pd.to_numeric(d["Minutes"], errors="coerce").fillna(0)
+    d = d.sort_values("Minutes", ascending=False)
+    if d.empty:
+        return None
+    return str(d.iloc[0]["Bucket"]), float(d.iloc[0]["Minutes"])
+
+
+def build_ground_ops_impact_stations(station_metrics: pd.DataFrame, max_rows: int = 5) -> pd.DataFrame:
+    cols = ["Station", "Flights", "OTP D15", "GOPS min", "GOPS share (%)", "Action / caveat"]
+    if station_metrics is None or station_metrics.empty or "GOPSMinutes" not in station_metrics.columns:
+        return pd.DataFrame(columns=cols)
+    d = station_metrics.copy()
+    d["GOPSMinutes"] = pd.to_numeric(d["GOPSMinutes"], errors="coerce").fillna(0)
+    d = d[d["GOPSMinutes"] > 0].sort_values("GOPSMinutes", ascending=False).head(max_rows)
+    rows = []
+    for _, r in d.iterrows():
+        rows.append(
+            {
+                "Station": r.get("Station"),
+                "Flights": fmt_int(r.get("Flights")),
+                "OTP D15": _fmt_pct(r.get("OTP"), 1),
+                "GOPS min": fmt_int(r.get("GOPSMinutes")),
+                "GOPS share (%)": _fmt_pct(r.get("GOPSSharePct"), 1),
+                "Action / caveat": _materiality_note(r.get("Flights")),
+            }
+        )
+    return pd.DataFrame(rows, columns=cols)
+
+
+def build_delay_context_indicators(accountability_df: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    labels = [
+        ("Controllable Ground Ops minutes", "Controllable - Ground Ops"),
+        ("Controllable Other categories minutes", "Controllable - Other categories"),
+        ("Inherited / reactionary minutes", "Inherited / reactionary"),
+        ("Other / not classified minutes", "Other / not classified"),
+    ]
+    for label, bucket in labels:
+        minutes = _accountability_value(accountability_df, bucket, "Minutes")
+        share = _accountability_value(accountability_df, bucket, "SharePct")
+        rows.append(
+            {
+                "Indicator": label,
+                "Minutes": fmt_int(minutes),
+                "Share": _fmt_pct(share, 1),
+                "Basis": "selected-scope synthetic evidence",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def build_network_kpi_summary(snapshot: dict[str, Any], station_metrics: pd.DataFrame) -> pd.DataFrame:
+    top_station = None
+    bench_station = None
+    if station_metrics is not None and not station_metrics.empty:
+        d = station_metrics.dropna(subset=["AvgDelayMin"]).copy()
+        if not d.empty:
+            top_station = d.sort_values("AvgDelayMin", ascending=False).iloc[0]
+            bench_station = d.sort_values("AvgDelayMin", ascending=True).iloc[0]
+
+    rows = [
+        {"Metric": "Flights operated", "Value": fmt_int(snapshot.get("Flights")), "Note": "selected synthetic scope"},
+        {"Metric": "Avg DEP Delay per Flight", "Value": fmt_float(snapshot.get("AvgDelay"), 2), "Note": str(snapshot.get("AvgDelayBasis", "computed from selected scope"))},
+        {"Metric": "DEP OTP D15", "Value": _fmt_pct(snapshot.get("OTP"), 1), "Note": "target benchmark 85.0%"},
+    ]
+    if top_station is not None:
+        rows.append(
+            {
+                "Metric": "Top station by Avg DEP Delay per Flight",
+                "Value": f"{top_station.get('Station')} | {fmt_float(top_station.get('AvgDelayMin'), 2)} min",
+                "Note": _materiality_note(top_station.get("Flights")),
+            }
+        )
+    if bench_station is not None:
+        rows.append(
+            {
+                "Metric": "Benchmark station by Avg DEP Delay per Flight",
+                "Value": f"{bench_station.get('Station')} | {fmt_float(bench_station.get('AvgDelayMin'), 2)} min",
+                "Note": _materiality_note(bench_station.get("Flights")),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def build_station_ranking_snapshot(station_metrics: pd.DataFrame) -> pd.DataFrame:
+    cols = ["View", "Station", "Avg delay", "Flights", "Materiality note"]
+    if station_metrics is None or station_metrics.empty:
+        return pd.DataFrame(columns=cols)
+    d = station_metrics.dropna(subset=["AvgDelayMin"]).copy()
+    if d.empty:
+        return pd.DataFrame(columns=cols)
+    top = d.sort_values("AvgDelayMin", ascending=False).iloc[0]
+    bench = d.sort_values("AvgDelayMin", ascending=True).iloc[0]
+    rows = [
+        {
+            "View": "Top station by Avg Delay",
+            "Station": top.get("Station"),
+            "Avg delay": fmt_float(top.get("AvgDelayMin"), 2),
+            "Flights": fmt_int(top.get("Flights")),
+            "Materiality note": _materiality_note(top.get("Flights")),
+        },
+        {
+            "View": "Benchmark station by Avg Delay",
+            "Station": bench.get("Station"),
+            "Avg delay": fmt_float(bench.get("AvgDelayMin"), 2),
+            "Flights": fmt_int(bench.get("Flights")),
+            "Materiality note": _materiality_note(bench.get("Flights")),
+        },
+    ]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def build_executive_summary_matrix(
+    snapshot: dict[str, Any],
+    station_metrics: pd.DataFrame,
+    action_focus: str,
+) -> pd.DataFrame:
+    otp = snapshot.get("OTP")
+    gap = None if otp is None or pd.isna(otp) else float(otp) - 85.0
+    top_gops = None
+    if station_metrics is not None and not station_metrics.empty and "GOPSMinutes" in station_metrics.columns:
+        g = station_metrics.copy()
+        g["GOPSMinutes"] = pd.to_numeric(g["GOPSMinutes"], errors="coerce").fillna(0)
+        g = g[g["GOPSMinutes"] > 0].sort_values("GOPSMinutes", ascending=False)
+        if not g.empty:
+            top_gops = g.iloc[0]
+    if top_gops is not None:
+        pain_station = f"{top_gops.get('Station')} by Ground Ops minutes"
+    else:
+        ranked = build_station_ranking_snapshot(station_metrics)
+        pain_station = str(ranked.iloc[0]["Station"]) + " by Avg DEP Delay with materiality caveat" if not ranked.empty else "not available"
+
+    rows = [
+        {"Signal": "OTP D15", "Value": _fmt_pct(otp, 1), "Decision use": "selected synthetic scope"},
+        {"Signal": "Target", "Value": "85.0%", "Decision use": "demo target benchmark"},
+        {"Signal": "Target gap", "Value": "not available" if gap is None else f"{gap:+.1f} pts", "Decision use": "positive means above target"},
+        {"Signal": "Flights operated", "Value": fmt_int(snapshot.get("Flights")), "Decision use": "materiality context"},
+        {"Signal": "Top pain station", "Value": pain_station, "Decision use": "where review starts"},
+        {"Signal": "Primary action review", "Value": action_focus, "Decision use": "public-safe next review path"},
+    ]
+    return pd.DataFrame(rows)
+
+
+def build_leadership_framing(
+    snapshot: dict[str, Any],
+    station_metrics: pd.DataFrame,
+    accountability_df: pd.DataFrame,
+    action_focus: str,
+) -> list[str]:
+    otp = snapshot.get("OTP")
+    gap_text = "not available" if otp is None or pd.isna(otp) else f"{float(otp) - 85.0:+.1f} points vs 85.0% target"
+    largest = _largest_bucket(accountability_df)
+    bucket_text = f"{largest[0]} is the largest delay context bucket at {fmt_int(largest[1])} minutes" if largest else "delay context bucket unavailable"
+    station_text = "station-level pain point unavailable"
+    if station_metrics is not None and not station_metrics.empty:
+        ranked = station_metrics.dropna(subset=["AvgDelayMin"]).sort_values("AvgDelayMin", ascending=False)
+        if not ranked.empty:
+            top = ranked.iloc[0]
+            station_text = f"{top.get('Station')} has the highest average delay in the selected synthetic scope"
+    return [
+        "Decision context: convert synthetic operational evidence into a review sequence.",
+        f"OTP vs target and gap: {gap_text}.",
+        f"Headline operational pain: {station_text}; {bucket_text}.",
+        f"Action focus: {action_focus}",
+        "Synthetic data note: all figures are computer-generated for public demonstration.",
+    ]
+
+
+def build_action_lanes(
+    station_metrics: pd.DataFrame,
+    accountability_df: pd.DataFrame,
+    top_code_lookup: dict[str, str],
+) -> pd.DataFrame:
+    lane_cols = ["Lane", "Evidence", "Review focus"]
+    gops_station_text = "Ground Ops station evidence not available"
+    top_station = None
+    if station_metrics is not None and not station_metrics.empty:
+        d = station_metrics.copy()
+        d["GOPSMinutes"] = pd.to_numeric(d.get("GOPSMinutes"), errors="coerce").fillna(0)
+        d = d[d["GOPSMinutes"] > 0].sort_values("GOPSMinutes", ascending=False)
+        if not d.empty:
+            top_station = d.iloc[0]
+            top_two = d.head(2)
+            parts = [f"{r.get('Station')} {fmt_int(r.get('GOPSMinutes'))} min" for _, r in top_two.iterrows()]
+            gops_station_text = "; ".join(parts)
+
+    if top_station is not None:
+        station_key = str(top_station.get("Station"))
+        code = top_code_lookup.get(station_key)
+        if code:
+            gops_focus = f"Review highest-impact synthetic station; start with code {code} as a public demo drilldown."
+        else:
+            gops_focus = "Review highest-impact synthetic station; start with selected-scope category drilldown."
+    else:
+        gops_focus = "Start with selected-scope category drilldown."
+
+    largest = _largest_bucket(accountability_df)
+    inherited_minutes = _accountability_value(accountability_df, "Inherited / reactionary", "Minutes") or 0.0
+    gops_minutes = _accountability_value(accountability_df, "Controllable - Ground Ops", "Minutes") or 0.0
+    if largest and largest[0] == "Inherited / reactionary":
+        inherited_focus = "Governance review before assigning Ground Ops action."
+    elif inherited_minutes > gops_minutes:
+        inherited_focus = "Protect reactionary/inherited risk before narrowing Ground Ops accountability."
+    else:
+        inherited_focus = "Keep inherited/reactionary context visible while reviewing controllable levers."
+    inherited_evidence = f"Inherited / reactionary {fmt_int(inherited_minutes)} min; largest bucket {largest[0] if largest else 'not available'}."
+
+    station_focus = "Use local drilldown on the highest-priority synthetic station; avoid over-reading low-volume averages."
+    if top_station is not None:
+        station_evidence = (
+            f"{top_station.get('Station')} | flights {fmt_int(top_station.get('Flights'))} | "
+            f"avg delay {fmt_float(top_station.get('AvgDelayMin'), 2)} min | {_materiality_note(top_station.get('Flights'))}."
+        )
+    else:
+        station_evidence = "Station priority not available for the selected synthetic scope."
+
+    rows = [
+        {
+            "Lane": "A) Ground Ops controllable delay",
+            "Evidence": gops_station_text,
+            "Review focus": gops_focus,
+        },
+        {
+            "Lane": "B) Reactionary / inherited delay protection",
+            "Evidence": inherited_evidence,
+            "Review focus": inherited_focus,
+        },
+        {
+            "Lane": "C) Station follow-up / local drilldown",
+            "Evidence": station_evidence,
+            "Review focus": station_focus,
+        },
+        {
+            "Lane": "D) TAT layer",
+            "Evidence": "TAT layer is not included in this public synthetic demo.",
+            "Review focus": "In the full methodology, TAT is used as a turnaround execution risk layer.",
+        },
+    ]
+    return pd.DataFrame(rows, columns=lane_cols)
+
+
+def build_top_code_lookup(top_codes_df: pd.DataFrame | None) -> dict[str, str]:
+    if top_codes_df is None or top_codes_df.empty:
+        return {}
+    station_col = pick_column(top_codes_df, STATION_CANDIDATES, token_groups=[["station"]])
+    code_col = pick_column(top_codes_df, ["DelayCode", "Delay Code", "Code"], token_groups=[["code"]])
+    minutes_col = pick_column(top_codes_df, MINUTES_CANDIDATES, token_groups=[["min"]])
+    if station_col is None or code_col is None:
+        return {}
+    d = top_codes_df.copy()
+    if minutes_col is not None:
+        d["_minutes"] = pd.to_numeric(d[minutes_col], errors="coerce").fillna(0)
+        d = d.sort_values("_minutes", ascending=False)
+    out: dict[str, str] = {}
+    for station, g in d.groupby(station_col):
+        if g.empty:
+            continue
+        code = str(g.iloc[0][code_col]).strip()
+        if code:
+            out[str(station)] = code
+    return out
+
+
+def build_confidence_caveats(include_appendix: bool) -> list[str]:
+    appendix_state = "enabled" if include_appendix else "available only when enabled"
+    return [
+        "Evidence basis: selected-scope synthetic artifacts.",
+        "This public demo uses synthetic data only.",
+        "Delay Category / Owner basis: DelayCategory.",
+        "No employer data, real station figures, internal context, or company identity is present.",
+        f"Technical appendix is {appendix_state}.",
+    ]
+
+
 def build_sanitized_appendix(
     required_files: list[str],
     station_kpi_df: pd.DataFrame,
@@ -666,15 +1010,15 @@ def build_pdf_bytes(
     grain: str,
     period_selected: str,
     station_selected: str,
-    snapshot: dict[str, Any],
-    worst_df: pd.DataFrame,
-    drivers_df: pd.DataFrame,
-    accountability_df: pd.DataFrame,
+    executive_matrix_df: pd.DataFrame,
+    leadership_framing: list[str],
+    action_lanes_df: pd.DataFrame,
+    ground_ops_stations_df: pd.DataFrame,
+    delay_context_df: pd.DataFrame,
+    network_summary_df: pd.DataFrame,
+    station_snapshot_df: pd.DataFrame,
     appendix_df: pd.DataFrame,
-    executive_findings: list[str],
-    include_snapshot: bool,
-    include_ranking: bool,
-    include_drivers: bool,
+    caveats: list[str],
     include_appendix: bool,
     otp_chart_png: bytes | None = None,
     pareto_chart_png: bytes | None = None,
@@ -702,6 +1046,34 @@ def build_pdf_bytes(
     )
     story: list[Any] = []
 
+    small_style = styles["BodyText"].clone("SmallBody")
+    small_style.fontSize = 8
+    small_style.leading = 10
+    normal_style = styles["BodyText"].clone("CompactBody")
+    normal_style.fontSize = 9
+    normal_style.leading = 11
+
+    def _pdf_cell(value: Any, header: bool = False) -> Any:
+        txt = "not available" if value is None or pd.isna(value) else str(value)
+        txt = txt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return Paragraph(txt, styles["Normal"] if header else small_style)
+
+    def _col_widths(columns: list[str]) -> list[float]:
+        page_width = A4[0] - doc.leftMargin - doc.rightMargin
+        if len(columns) <= 2:
+            return [page_width * 0.28, page_width * 0.72]
+        weights = []
+        for c in columns:
+            c_low = str(c).lower()
+            if c_low in {"lane", "action / caveat", "review focus", "decision use", "note", "materiality note", "basis"}:
+                weights.append(2.2)
+            elif c_low in {"evidence", "value"}:
+                weights.append(2.0)
+            else:
+                weights.append(1.0)
+        total = sum(weights) or 1.0
+        return [page_width * w / total for w in weights]
+
     def add_table_from_df(section_title: str, tdf: pd.DataFrame) -> None:
         story.append(Paragraph(section_title, styles["Heading2"]))
         story.append(Spacer(1, 6))
@@ -710,10 +1082,11 @@ def build_pdf_bytes(
             story.append(Spacer(1, 10))
             return
         display = tdf.copy().fillna("not available")
-        for c in display.columns:
-            display[c] = display[c].map(lambda x: str(x))
-        data = [list(display.columns)] + display.values.tolist()
-        tbl = Table(data, repeatRows=1)
+        columns = [str(c) for c in display.columns]
+        data = [[_pdf_cell(c, header=True) for c in columns]]
+        for _, row in display.iterrows():
+            data.append([_pdf_cell(row[c]) for c in display.columns])
+        tbl = Table(data, repeatRows=1, colWidths=_col_widths(columns), hAlign="LEFT")
         tbl.setStyle(
             TableStyle(
                 [
@@ -724,11 +1097,25 @@ def build_pdf_bytes(
                     ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
                     ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FAFAFA")]),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
                 ]
             )
         )
         story.append(tbl)
         story.append(Spacer(1, 10))
+
+    def add_bullets(section_title: str, lines: list[str]) -> None:
+        story.append(Paragraph(section_title, styles["Heading2"]))
+        story.append(Spacer(1, 4))
+        if not lines:
+            story.append(Paragraph("Not available.", styles["Normal"]))
+        for line in lines:
+            story.append(Paragraph(f"- {line}", normal_style))
+            story.append(Spacer(1, 2))
+        story.append(Spacer(1, 8))
 
     story.append(Paragraph("IntelligenceOps Synthetic Decision Pack", styles["Title"]))
     story.append(Spacer(1, 8))
@@ -742,17 +1129,12 @@ def build_pdf_bytes(
         "No employer data, real station figures, internal context, or company identity is present.",
     ]
     for line in cover_lines:
-        story.append(Paragraph(line, styles["Normal"]))
+        story.append(Paragraph(line, normal_style))
     story.append(Spacer(1, 12))
 
-    story.append(Paragraph("Executive Summary", styles["Heading1"]))
-    if executive_findings:
-        for finding in executive_findings:
-            story.append(Paragraph(f"- {finding}", styles["Normal"]))
-            story.append(Spacer(1, 3))
-    else:
-        story.append(Paragraph("No executive findings are available for the selected synthetic scope.", styles["Normal"]))
-    story.append(Spacer(1, 10))
+    add_table_from_df("Executive Summary", executive_matrix_df)
+    add_bullets("Leadership Framing", leadership_framing)
+    add_table_from_df("Action Lanes", action_lanes_df)
 
     if otp_chart_png is not None:
         story.append(Paragraph("OTP D15 Trend", styles["Heading2"]))
@@ -762,48 +1144,20 @@ def build_pdf_bytes(
         story.append(otp_img)
         story.append(Spacer(1, 8))
 
-    if include_snapshot:
-        snap_df = pd.DataFrame(
-            [
-                {
-                    "Flights": fmt_int(snapshot.get("Flights")),
-                    "Total DEP Delay Minutes": fmt_int(snapshot.get("TotalMinutes")),
-                    "Avg DEP Delay per Flight (min)": fmt_float(snapshot.get("AvgDelay"), 2),
-                    "DEP OTP D15 (%)": fmt_float(snapshot.get("OTP"), 2),
-                    "Avg Basis": snapshot.get("AvgDelayBasis"),
-                    "OTP Basis": snapshot.get("OTPBasis"),
-                }
-            ]
-        )
-        add_table_from_df("KPI Snapshot", snap_df)
-    if include_ranking:
-        worst_pdf = df_for_pdf(worst_df, ["Station", "AvgDelayMin", "Flights", "TotalMinutes"], max_rows=10).copy()
-        if not worst_pdf.empty:
-            worst_pdf["AvgDelayMin"] = worst_pdf["AvgDelayMin"].map(lambda x: fmt_float(x, 2))
-            worst_pdf["Flights"] = worst_pdf["Flights"].map(fmt_int)
-            worst_pdf["TotalMinutes"] = worst_pdf["TotalMinutes"].map(fmt_int)
-        add_table_from_df("Station Review", worst_pdf)
-    if include_drivers:
-        story.append(Paragraph("Delay Accountability", styles["Heading2"]))
-        story.append(Paragraph("Owner basis is DelayCategory. The split below uses selected-scope synthetic category minutes.", styles["Normal"]))
-        story.append(Spacer(1, 6))
-        drv_pdf = df_for_pdf(drivers_df, ["DelayCategory", "Minutes", "SharePct"], max_rows=10).copy()
-        if not drv_pdf.empty:
-            drv_pdf["Minutes"] = drv_pdf["Minutes"].map(fmt_int)
-            drv_pdf["SharePct"] = drv_pdf["SharePct"].map(lambda x: fmt_float(x, 2))
-        add_table_from_df("DelayCategory Pareto Table", drv_pdf)
-        if pareto_chart_png is not None:
-            story.append(Spacer(1, 6))
-            from io import BytesIO as _BytesIO
-            pareto_img = Image(_BytesIO(pareto_chart_png), width=14 * cm, height=7.3 * cm)
-            story.append(pareto_img)
-            story.append(Spacer(1, 8))
+    add_table_from_df("Ground Ops Impact Stations", ground_ops_stations_df)
+    add_table_from_df("Delay Context Indicators", delay_context_df)
+    add_table_from_df("Network KPI Summary", network_summary_df)
+    add_table_from_df("Station Ranking Snapshot", station_snapshot_df)
 
-        split_pdf = df_for_pdf(accountability_df, ["Bucket", "Minutes", "SharePct"], max_rows=10).copy()
-        if not split_pdf.empty:
-            split_pdf["Minutes"] = split_pdf["Minutes"].map(fmt_int)
-            split_pdf["SharePct"] = split_pdf["SharePct"].map(lambda x: fmt_float(x, 2))
-        add_table_from_df("Controllable / Inherited / Reactionary Split", split_pdf)
+    if pareto_chart_png is not None:
+        story.append(Paragraph("DelayCategory Pareto", styles["Heading2"]))
+        story.append(Spacer(1, 6))
+        from io import BytesIO as _BytesIO
+        pareto_img = Image(_BytesIO(pareto_chart_png), width=14 * cm, height=7.3 * cm)
+        story.append(pareto_img)
+        story.append(Spacer(1, 8))
+
+    add_bullets("Confidence / Caveats", caveats)
 
     if include_appendix:
         story.append(PageBreak())
@@ -831,7 +1185,6 @@ def export_decision_pack_pdf(
     if not isinstance(ctx, dict):
         raise ValueError("Invalid ctx: expected dict.")
 
-    run_stamp = ctx.get("run_stamp") if isinstance(ctx.get("run_stamp"), dict) else {}
     region = str(ctx.get("region", "")).strip()
     mode = str(ctx.get("mode", "")).strip()
     required_files = ensure_list(ctx.get("required_files"))
@@ -842,12 +1195,14 @@ def export_decision_pack_pdf(
     if not region or not mode:
         raise RuntimeError("Demo data context missing scope metadata.")
     if not required_files:
-        raise RuntimeError("run_stamp.required_files is missing/empty.")
+        raise RuntimeError("Demo data contract registry is missing/empty.")
 
     station_kpi_name = f"2025_DEP_Monthly_Station_KPIs__{region}.csv" if grain == "Monthly" else f"2025_DEP_Weekly_Station_KPIs__{region}.csv"
     delay_minutes_name = f"2025_DEP_DelayCategory_Minutes__{region}_NORM__MONTHLY.csv" if grain == "Monthly" else f"2025_DEP_DelayCategory_Minutes__{region}_NORM__WEEKLY.csv"
+    top_codes_name = f"2025_DEP_TopDelayCodes__{region}_NORM.csv"
     _, station_kpi_path = resolve_required_file(required_files, station_kpi_name, insights_dir, artifacts_by_name)
     _, delay_minutes_path = resolve_required_file(required_files, delay_minutes_name, insights_dir, artifacts_by_name)
+    _, top_codes_path = resolve_required_file(required_files, top_codes_name, insights_dir, artifacts_by_name)
 
     if not station_kpi_path.exists():
         raise FileNotFoundError(f"Required Station KPI file missing: {station_kpi_path}")
@@ -867,6 +1222,8 @@ def export_decision_pack_pdf(
     else:
         runtime_data_log(f"WARNING: Periodized DelayCategory file not found for grain={grain}: {delay_minutes_path} — drivers section will be empty.")
         delay_minutes_df = pd.DataFrame()
+
+    top_codes_df = load_csv(top_codes_path) if top_codes_path.exists() else pd.DataFrame()
 
     kpi_work, kpi_mapping, kpi_err = build_station_kpi_work(station_kpi_df, grain)
     if kpi_err is not None:
@@ -910,18 +1267,32 @@ def export_decision_pack_pdf(
         if station_selected is None:
             raise ValueError(f"Requested station not found in active stations for period {period_selected}: {station}")
 
+    if station_selected != "NETWORK" and kpi_mapping["station"] is not None:
+        station_period_slice = period_slice[period_slice[kpi_mapping["station"]].astype(str) == station_selected].copy()
+    else:
+        station_period_slice = period_slice.copy()
+
     snapshot = build_snapshot(period_slice, station_selected, kpi_mapping)
-    worst_df, _best_df = build_station_ranking(period_slice, kpi_mapping)
+    station_metrics = _station_metric_frame(station_period_slice, kpi_mapping)
     if not delay_work.empty:
-        drivers_df, drivers_scope_note = build_drivers_summary(delay_work, period_selected, station_selected, delay_mapping)
+        drivers_df, _drivers_scope_note = build_drivers_summary(delay_work, period_selected, station_selected, delay_mapping)
         accountability_df = build_accountability_split(delay_work, period_selected, station_selected, delay_mapping)
     else:
-        drivers_df, drivers_scope_note = pd.DataFrame(), "delay minutes source unavailable"
+        drivers_df = pd.DataFrame()
         accountability_df = pd.DataFrame(columns=["Bucket", "Minutes", "SharePct"])
 
     qa_df = load_csv(qa_summary_path) if (include_qa and qa_summary_path is not None and qa_summary_path.exists()) else None
     appendix_df = build_sanitized_appendix(required_files, station_kpi_df, delay_minutes_df, qa_df)
-    executive_findings = build_executive_findings(snapshot, drivers_df, accountability_df, worst_df)
+    top_code_lookup = build_top_code_lookup(top_codes_df)
+    action_focus = "Review the highest-impact synthetic station using selected-scope Ground Ops and delay-category evidence."
+    executive_matrix_df = build_executive_summary_matrix(snapshot, station_metrics, action_focus)
+    leadership_framing = build_leadership_framing(snapshot, station_metrics, accountability_df, action_focus)
+    action_lanes_df = build_action_lanes(station_metrics, accountability_df, top_code_lookup)
+    ground_ops_stations_df = build_ground_ops_impact_stations(station_metrics)
+    delay_context_df = build_delay_context_indicators(accountability_df)
+    network_summary_df = build_network_kpi_summary(snapshot, station_metrics)
+    station_snapshot_df = build_station_ranking_snapshot(station_metrics)
+    caveats = build_confidence_caveats(include_qa)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     pdf_name = PUBLIC_PDF_FILENAME
@@ -936,15 +1307,15 @@ def export_decision_pack_pdf(
         grain=grain,
         period_selected=period_selected,
         station_selected=station_selected,
-        snapshot=snapshot,
-        worst_df=worst_df,
-        drivers_df=drivers_df,
-        accountability_df=accountability_df,
+        executive_matrix_df=executive_matrix_df,
+        leadership_framing=leadership_framing,
+        action_lanes_df=action_lanes_df,
+        ground_ops_stations_df=ground_ops_stations_df,
+        delay_context_df=delay_context_df,
+        network_summary_df=network_summary_df,
+        station_snapshot_df=station_snapshot_df,
         appendix_df=appendix_df,
-        executive_findings=executive_findings,
-        include_snapshot=include_snapshot,
-        include_ranking=include_ranking,
-        include_drivers=include_drivers,
+        caveats=caveats,
         include_appendix=include_qa,
         otp_chart_png=otp_chart_png,
         pareto_chart_png=pareto_chart_png,
@@ -1074,7 +1445,6 @@ if is_streamlit_runtime():
         st.stop()
     render_filter_banner(ctx, filters)
 
-    run_stamp = ctx.get("run_stamp") if isinstance(ctx.get("run_stamp"), dict) else {}
     region = str(ctx.get("region", "")).strip()
     mode = str(ctx.get("mode", "")).strip()
     required_files = ensure_list(ctx.get("required_files"))
@@ -1100,11 +1470,11 @@ if is_streamlit_runtime():
     station_summary = "NETWORK" if stations_from_filters == ["NETWORK"] else f"{len(stations_from_filters)} selected"
     st.caption(f"Filters: Grain={grain} | Periods={period_summary} | Stations={station_summary}")
 
-    t1, t2, t3, t4 = st.columns(4)
-    include_snapshot = bool(t1.toggle("Include KPI Snapshot", value=True))
-    include_ranking = bool(t2.toggle("Include Station Review", value=True))
-    include_drivers = bool(t3.toggle("Include Delay Accountability", value=True))
-    include_qa = bool(t4.toggle("Include Technical Appendix", value=False))
+    st.caption("Leadership sections are included by default: executive summary, action lanes, station impact, delay context, KPI summary, and caveats.")
+    include_snapshot = True
+    include_ranking = True
+    include_drivers = True
+    include_qa = bool(st.toggle("Include Technical Appendix", value=False))
 
     station_kpi_name = (
         f"2025_DEP_Monthly_Station_KPIs__{region}.csv"
