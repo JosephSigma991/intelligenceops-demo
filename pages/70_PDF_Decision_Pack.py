@@ -26,7 +26,7 @@ from kpi_config import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PUBLIC_SCOPE_LABEL = "Synthetic Demo"
+PUBLIC_SCOPE_LABEL = "Demo Data"
 PUBLIC_PDF_FILENAME = "IntelligenceOps_Synthetic_DecisionPack.pdf"
 
 
@@ -584,11 +584,36 @@ def _materiality_note(flights: Any) -> str:
     return "sufficient demo volume for review"
 
 
+def _ground_ops_action_text(row: pd.Series) -> str:
+    flights = row.get("Flights")
+    try:
+        flight_count = float(flights)
+    except Exception:
+        flight_count = 0.0
+    if flight_count < 30:
+        return "Materiality caveat: low flight volume may distort average delay."
+
+    otp = row.get("OTP")
+    gops_minutes = row.get("GOPSMinutes")
+    try:
+        otp_val = float(otp)
+    except Exception:
+        otp_val = float("nan")
+    try:
+        gops_val = float(gops_minutes)
+    except Exception:
+        gops_val = 0.0
+
+    if not pd.isna(otp_val) and otp_val >= 85.0 and gops_val > 0:
+        return "Monitor local process consistency; delay exposure exists despite acceptable OTP."
+    return "Review turnaround readiness pattern: boarding closure, ramp coordination, baggage delivery, load control readiness."
+
+
 def _reason_route_for_category(category: Any) -> tuple[str, str]:
     label = _normalized_category_label(category)
     if "groundops" in label or label == "gops":
         return (
-            "boarding/ramp/load-control readiness pattern",
+            "boarding closure, ramp coordination, baggage delivery, load control readiness",
             "Station Manager / GHA with Area Manager follow-up",
         )
     if "latearrival" in label or "reactionary" in label or "inherited" in label or "lateaircraft" in label or "lateacft" in label:
@@ -694,7 +719,7 @@ def build_ground_ops_impact_stations(station_metrics: pd.DataFrame, max_rows: in
                 "OTP D15": _fmt_pct(r.get("OTP"), 1),
                 "GOPS min": fmt_int(r.get("GOPSMinutes")),
                 "GOPS share (%)": _fmt_pct(r.get("GOPSSharePct"), 1),
-                "Action / caveat": _materiality_note(r.get("Flights")),
+                "Action / caveat": _ground_ops_action_text(r),
             }
         )
     return pd.DataFrame(rows, columns=cols)
@@ -916,13 +941,6 @@ def build_action_lanes(
             "Evidence": station_evidence,
             "Decision": station_focus,
         },
-        {
-            "Lane": "TAT layer",
-            "Operational reason": "turnaround execution risk layer",
-            "Action route": "Turnaround coordinator",
-            "Evidence": "TAT layer is not included in this public demo.",
-            "Decision": "In the full methodology, TAT is used as a turnaround execution risk layer.",
-        },
     ]
     return pd.DataFrame(rows, columns=lane_cols)
 
@@ -957,7 +975,7 @@ def build_decision_impact(station_metrics: pd.DataFrame, accountability_df: pd.D
         {"Signal": "Top controllable bucket", "Value": top_bucket, "Decision interpretation": "Start where controllable exposure is largest."},
         {"Signal": "Top station", "Value": top_station_value, "Decision interpretation": "Use station evidence before escalating network action."},
         {"Signal": "Minutes exposed", "Value": fmt_int(exposed_minutes), "Decision interpretation": "Magnitude of selected-scope controllable exposure."},
-        {"Signal": "Simple improvement scenario", "Value": scenario, "Decision interpretation": "Minutes-only scenario; no OTP lift is claimed."},
+        {"Signal": "15% minutes-only scenario", "Value": scenario, "Decision interpretation": "No OTP lift is claimed without scenario-model validation."},
     ]
     return pd.DataFrame(rows, columns=cols)
 
@@ -998,6 +1016,7 @@ def build_confidence_caveats(include_appendix: bool) -> list[str]:
         "Evidence basis: selected-scope evidence from demo data.",
         "This public decision pack uses demo data. It demonstrates method, governance, and decision routing. It does not contain employer data, real station figures, internal context, or company identity.",
         "Delay Category / Owner basis: DelayCategory.",
+        "TAT layer caveat: TAT layer is not included in this public demo. In the full methodology, TAT is used as a turnaround execution risk layer.",
         f"Technical appendix is {appendix_state}.",
     ]
 
@@ -1119,7 +1138,7 @@ def build_pdf_bytes(
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import getSampleStyleSheet
         from reportlab.lib.units import cm
-        from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+        from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
     except Exception as e:
         raise RuntimeError(f"ReportLab import failed: {type(e).__name__}: {e}") from e
 
@@ -1143,6 +1162,17 @@ def build_pdf_bytes(
     normal_style = styles["BodyText"].clone("CompactBody")
     normal_style.fontSize = 9
     normal_style.leading = 11
+    cover_title_style = styles["Title"].clone("CoverTitle")
+    cover_title_style.fontSize = 22
+    cover_title_style.leading = 26
+    cover_subtitle_style = styles["Heading2"].clone("CoverSubtitle")
+    cover_subtitle_style.fontSize = 12
+    cover_subtitle_style.leading = 15
+    cover_subtitle_style.textColor = colors.HexColor("#1E3A5F")
+    card_title_style = styles["Heading3"].clone("CardTitle")
+    card_title_style.fontSize = 10
+    card_title_style.leading = 12
+    card_title_style.textColor = colors.HexColor("#0B1220")
 
     def _pdf_cell(value: Any, header: bool = False) -> Any:
         txt = "not available" if value is None or pd.isna(value) else str(value)
@@ -1156,7 +1186,7 @@ def build_pdf_bytes(
         weights = []
         for c in columns:
             c_low = str(c).lower()
-            if c_low in {"lane", "action / caveat", "review focus", "decision use", "note", "materiality note", "basis"}:
+            if c_low in {"lane", "action / caveat", "action route", "review focus", "decision use", "decision interpretation", "note", "materiality note", "basis"}:
                 weights.append(2.2)
             elif c_low in {"evidence", "value"}:
                 weights.append(2.0)
@@ -1166,11 +1196,8 @@ def build_pdf_bytes(
         return [page_width * w / total for w in weights]
 
     def add_table_from_df(section_title: str, tdf: pd.DataFrame) -> None:
-        story.append(Paragraph(section_title, styles["Heading2"]))
-        story.append(Spacer(1, 6))
         if tdf.empty:
-            story.append(Paragraph("Not available.", styles["Normal"]))
-            story.append(Spacer(1, 10))
+            story.append(KeepTogether([Paragraph(section_title, styles["Heading2"]), Spacer(1, 6), Paragraph("Not available.", styles["Normal"]), Spacer(1, 10)]))
             return
         display = tdf.copy().fillna("not available")
         columns = [str(c) for c in display.columns]
@@ -1195,8 +1222,69 @@ def build_pdf_bytes(
                 ]
             )
         )
-        story.append(tbl)
-        story.append(Spacer(1, 10))
+        story.append(KeepTogether([Paragraph(section_title, styles["Heading2"]), Spacer(1, 6), tbl, Spacer(1, 10)]))
+
+    def add_decision_impact(tdf: pd.DataFrame) -> None:
+        story.append(Paragraph("Decision Impact", styles["Heading2"]))
+        story.append(Spacer(1, 6))
+        rows = []
+        for _, r in tdf.iterrows():
+            label = str(r.get("Signal", ""))
+            value = str(r.get("Value", "not available"))
+            note = str(r.get("Decision interpretation", ""))
+            rows.append([_pdf_cell(label, header=True), _pdf_cell(f"{value} | {note}")])
+        if not rows:
+            rows = [[_pdf_cell("Decision impact", header=True), _pdf_cell("Not available.")]]
+        page_width = A4[0] - doc.leftMargin - doc.rightMargin
+        tbl = Table(rows, colWidths=[page_width * 0.30, page_width * 0.70], hAlign="LEFT")
+        tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F6F8FB")),
+                    ("BOX", (0, 0), (-1, -1), 0.75, colors.HexColor("#B8C7DA")),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D5DCE8")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ]
+            )
+        )
+        story.append(KeepTogether([tbl, Spacer(1, 12)]))
+
+    def add_action_lane_cards(tdf: pd.DataFrame) -> None:
+        story.append(Paragraph("Action Lanes", styles["Heading2"]))
+        story.append(Spacer(1, 6))
+        if tdf.empty:
+            story.append(Paragraph("Not available.", styles["Normal"]))
+            story.append(Spacer(1, 10))
+            return
+        page_width = A4[0] - doc.leftMargin - doc.rightMargin
+        for _, r in tdf.iterrows():
+            lane_title = str(r.get("Lane", "Action lane"))
+            rows = [
+                [_pdf_cell("Reason", header=True), _pdf_cell(r.get("Operational reason"))],
+                [_pdf_cell("Action route", header=True), _pdf_cell(r.get("Action route"))],
+                [_pdf_cell("Evidence", header=True), _pdf_cell(r.get("Evidence"))],
+                [_pdf_cell("Decision", header=True), _pdf_cell(r.get("Decision"))],
+            ]
+            tbl = Table(rows, colWidths=[page_width * 0.22, page_width * 0.78], hAlign="LEFT")
+            tbl.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFFFFF")),
+                        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#C9D4E5")),
+                        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E5E7EB")),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ]
+                )
+            )
+            story.append(KeepTogether([Paragraph(lane_title, card_title_style), Spacer(1, 3), tbl, Spacer(1, 8)]))
 
     def add_bullets(section_title: str, lines: list[str]) -> None:
         story.append(Paragraph(section_title, styles["Heading2"]))
@@ -1208,25 +1296,24 @@ def build_pdf_bytes(
             story.append(Spacer(1, 2))
         story.append(Spacer(1, 8))
 
-    story.append(Paragraph("IntelligenceOps Synthetic Decision Pack", styles["Title"]))
+    story.append(Paragraph("IntelligenceOps Decision Pack", cover_title_style))
     story.append(Spacer(1, 8))
-    story.append(Paragraph("Public demo using synthetic flight operations data.", styles["Heading2"]))
+    story.append(Paragraph("Demo Data | Flight Operations Intelligence", cover_subtitle_style))
     story.append(Spacer(1, 8))
     cover_lines = [
         f"Scope: {PUBLIC_SCOPE_LABEL}",
         f"Selection: {grain} | {period_selected} | {station_selected}",
         datetime.now().strftime("Generated: %Y-%m-%d %H:%M:%S"),
-        "Synthetic note: station codes, delay minutes, OTP figures, trends, and outputs are computer-generated for demonstration.",
-        "No employer data, real station figures, internal context, or company identity is present.",
+        "This public pack uses demo data to demonstrate method, governance, and decision routing. It does not contain employer data, real station figures, internal context, or company identity.",
     ]
     for line in cover_lines:
         story.append(Paragraph(line, normal_style))
     story.append(Spacer(1, 12))
 
     add_table_from_df("Executive Summary", executive_matrix_df)
+    add_decision_impact(decision_impact_df)
     add_bullets("Leadership Framing", leadership_framing)
-    add_table_from_df("Decision Impact", decision_impact_df)
-    add_table_from_df("Action Lanes", action_lanes_df)
+    add_action_lane_cards(action_lanes_df)
 
     if otp_chart_png is not None:
         story.append(Paragraph("OTP D15 Trend", styles["Heading2"]))
@@ -1396,7 +1483,7 @@ def export_decision_pack_pdf(
     pareto_chart_png = build_pareto_png(drivers_df) if include_drivers else None
 
     pdf_bytes = build_pdf_bytes(
-        title="IntelligenceOps Synthetic Decision Pack",
+        title="IntelligenceOps Decision Pack",
         grain=grain,
         period_selected=period_selected,
         station_selected=station_selected,
