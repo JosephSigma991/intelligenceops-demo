@@ -4,14 +4,14 @@
 
 > **This is a public synthetic demo.** Station codes, delay minutes, OTP figures, trends, and scenario outputs are computer-generated for demonstration. No employer data, real station figures, internal context, or company identity is present. The demo reflects the architecture, methodology, KPI governance, and decision workflow behind the system without exposing operational data.
 
-IntelligenceOps processes raw flight and delay data from SQL Server through a validated ETL pipeline, publishes contract-verified CSV artifacts, and renders them as an interactive multi-page dashboard with executive PDF export capability. The system covers OTP D15 tracking, delay root cause analysis, station ranking, what-if scenario modeling, and data quality monitoring, all built against IATA delay accountability standards.
+IntelligenceOps processes flight and delay evidence through a governed SQL-style intelligence layer, publishes contract-verified CSV artifacts, and renders them as an interactive decision-intelligence demo with executive memo export capability. The system covers OTP D15 tracking, delay root cause analysis, TAT timing-risk exposure, station review, what-if scenario modeling, and validation coverage, all built against IATA delay accountability standards.
 
 ---
 
 ## Architecture
 
 ```
-SQL Server (FlightOpsDB)
+Governed SQL-style intelligence layer
     |
     v
 ETL Pipeline (PowerShell + Python)
@@ -20,13 +20,13 @@ ETL Pipeline (PowerShell + Python)
 CSV Contract (13 files, 3 time grains)
     |
     v
-Run Stamp JSON (Single Source of Truth)
+Validation manifest (governance reference)
     |
     v
-Streamlit Dashboard (8 pages)          PDF Decision Pack (ReportLab + Kaleido)
+Streamlit Dashboard (9 pages)          Synthetic Executive Decision Memo (ReportLab + Kaleido)
 ```
 
-**Two-layer design.** Layer 1 is a SQL Server ETL pipeline that ingests XLS flight exports, cleans data through hygiene views, and publishes validated CSVs. Layer 2 is the Streamlit application that consumes those artifacts read-only. The layers are decoupled through a JSON run stamp manifest that declares which files were published, when, and by which pipeline run.
+**Two-layer design.** Layer 1 is a governed SQL-style intelligence pipeline that ingests operational evidence, cleans data through hygiene views, and publishes validated CSVs. Layer 2 is the Streamlit application that consumes those artifacts read-only. The layers are decoupled through a validation manifest that declares which public demo artifacts are available for governed use.
 
 **Contract boundary.** The dashboard never renders data it hasn't validated. A CI pipeline checks all 13 required files across Annual, Monthly, and Weekly grains on every commit. Defensive column detection handles upstream schema drift without crashing.
 
@@ -42,8 +42,9 @@ Streamlit Dashboard (8 pages)          PDF Decision Pack (ReportLab + Kaleido)
 | 3 | Drivers / RCA | Analyst | Delay category Pareto, category trend, top delay codes drilldown, computed insights |
 | 4 | Scenarios | Management | What-if simulation, OTP regression model (weighted OLS), before/after visualization |
 | 5 | Dictionary | Everyone | KPI definitions (management tab), artifact registry (analyst tab) |
-| 6 | Data Quality | Pipeline Engineer | Provenance, gate evidence, flight data quality metrics, coverage trends |
-| 7 | PDF Decision Pack | Exec (via email) | Toggle sections, preview, generate + download PDF with embedded charts |
+| 6 | Data Quality | Pipeline Engineer | Validation coverage, gate evidence, flight data quality metrics, coverage trends |
+| 7 | Synthetic Executive Decision Memo | Exec (via email) | Toggle sections, preview, generate + download PDF with embedded charts |
+| 8 | Synthetic Cockpit | Senior Ops / OCC | TAT timing-risk exposure, handoff ownership, action routing, and validation status |
 
 ---
 
@@ -65,7 +66,7 @@ Streamlit Dashboard (8 pages)          PDF Decision Pack (ReportLab + Kaleido)
 
 ## Key Design Decisions
 
-**Run stamp as SSOT.** Every page resolves artifact paths through a JSON manifest, not filesystem assumptions. The stamp carries git branch, git commit, and timestamp for full traceability.
+**Governance manifest as validation reference.** Every page resolves public demo artifacts through a validation manifest, not filesystem assumptions. The manifest supports repeatable validation without exposing private operational evidence.
 
 **Defensive column detection.** `pick_column()` tries exact match, case-insensitive match, then normalized match against a candidate list. The app handles upstream schema drift without silent failures.
 
@@ -98,7 +99,7 @@ All validated by `validate_mode_a_contract.py` across 3 time grains in CI.
 Main_App.py              Entry point, homepage, CSS injection
 kpi_config.py            38 shared constants (candidates, colors, thresholds)
 utils.py                 17 shared functions (single source of truth)
-mode_a_run_context.py    Run stamp discovery, scope selector
+mode_a_run_context.py    Validation manifest discovery, scope selector
 mode_a_filters.py        Global sidebar filters (Grain / Period / Station)
 pages/
   10_Network_Overview.py
@@ -107,7 +108,9 @@ pages/
   40_Scenarios_Levers.py
   50_Dictionary_Policy.py
   60_Data_Quality_Coverage.py
-  70_PDF_Decision_Pack.py
+  70_Synthetic_Executive_Decision_Memo.py
+  80_Synthetic_Cockpit.py
+  90_Validation_Coverage.py
 ```
 
 ---
@@ -182,8 +185,8 @@ For a system built entirely by one person alongside a full-time operational role
 
 ## Author
 
-**Youssef Hamdaoui** (Mr BI)
-Airport Duty Manager & Operations Analyst
+**Youssef Hamdaoui**
+Airport operations practitioner | Operations Intelligence Architect
 Casablanca, Morocco
 
 - LinkedIn: [link]

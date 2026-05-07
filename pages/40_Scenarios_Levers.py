@@ -47,11 +47,11 @@ def fmt_delta(v: float | None, decimals: int = 0) -> str | None:
 
 
 st.title("Scenarios / Levers")
-st.caption("PASS-only. Deterministic simulation on published KPIs (minutes → avg delay → estimated OTP).")
+st.caption("Synthetic public demo view. Deterministic simulation on validated demo KPIs (minutes -> avg delay -> estimated OTP).")
 
 ctx = st.session_state.get("mode_a_ctx")
 if not isinstance(ctx, dict):
-    st.error("Select a run in the sidebar")
+    st.error("Select a demo scope in the sidebar")
     st.stop()
 render_freshness_banner(ctx)
 render_gate_verdict_banner(ctx)
@@ -71,7 +71,7 @@ insights_dir = Path(ctx.get("insights_dir", Path(os.getenv("FLIGHTOPS_INSIGHTS_D
 artifacts_by_name = ctx.get("artifacts_by_name", {}) or {}
 
 if not region or not mode:
-    st.error("Run context is missing region/mode.")
+    st.error("Validation context is missing region/mode.")
     st.stop()
 
 grain = str(filters.get("grain", "Monthly"))
@@ -84,9 +84,9 @@ st.caption(f"Filters: Grain={grain} | Periods={period_label} | Stations={station
 kpi_name = f"2025_DEP_Monthly_Station_KPIs__{region}.csv" if grain == "Monthly" else f"2025_DEP_Weekly_Station_KPIs__{region}.csv"
 kpi_listed, kpi_path = resolve_required_file(required_files, kpi_name, insights_dir, artifacts_by_name)
 if not required_files:
-    st.warning("run_stamp.required_files is missing/empty; proceeding with on-disk file validation.")
+    st.warning("Validation manifest required_files is missing/empty; proceeding with on-disk file validation.")
 elif not kpi_listed:
-    st.warning(f"KPI file is not listed in run_stamp.required_files: `{kpi_name}`")
+    st.warning(f"KPI file is not listed in validation manifest: `{kpi_name}`")
 
 if not kpi_path.exists():
     st.error(f"KPI file not found for selected grain: `{kpi_path}`")
@@ -390,9 +390,9 @@ else:
     )
     show_plotly(fig_preview, key="p40__whatif_preview")
 
-with st.expander("📋 Evidence & Source Details", expanded=False):
+with st.expander("Synthetic Evidence & Validation Details", expanded=False):
     e1, e2, e3, e4 = st.columns(4)
-    e1.metric("Build ID", str(stamp) if stamp else "<missing>")
+    e1.metric("Validation ID", str(stamp) if stamp else "<missing>")
     e2.metric("Region", str(region))
     e3.metric("Mode", str(mode))
     e4.metric("Version", str(git_commit)[:8] if git_commit else "<missing>")
@@ -418,5 +418,4 @@ with st.expander("📋 Evidence & Source Details", expanded=False):
         evidence_row["Model delay range"] = f"{otp_model['delay_min']:.1f}–{otp_model['delay_max']:.1f} min"
     selected_row_df = pd.DataFrame([evidence_row])
     st.dataframe(selected_row_df, width="stretch", hide_index=True)
-
 

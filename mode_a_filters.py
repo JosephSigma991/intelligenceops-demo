@@ -81,7 +81,7 @@ def _format_period_summary(periods: list[str]) -> str:
 
 def render_global_filters(st, ctx: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(ctx, dict):
-        st.error("Run context missing.")
+        st.error("Validation context missing.")
         st.stop()
 
     prev = st.session_state.get("mode_a_filters", {}) if isinstance(st.session_state.get("mode_a_filters"), dict) else {}

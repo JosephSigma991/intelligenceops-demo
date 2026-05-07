@@ -27,7 +27,7 @@ from kpi_config import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_SCOPE_LABEL = "Demo Data"
-PUBLIC_PDF_FILENAME = "IntelligenceOps_Synthetic_DecisionPack.pdf"
+PUBLIC_PDF_FILENAME = "IntelligenceOps_Synthetic_Executive_Decision_Memo.pdf"
 
 
 def default_insights_dir() -> Path:
@@ -1021,9 +1021,9 @@ def build_confidence_caveats(include_appendix: bool) -> list[str]:
     appendix_state = "enabled" if include_appendix else "available only when enabled"
     return [
         "Evidence basis: selected-scope evidence from demo data.",
-        "This public decision pack uses demo data. It demonstrates method, governance, and decision routing. It does not contain employer data, real station figures, internal context, or company identity.",
+        "This public executive memo uses demo data. It demonstrates method, governance, TAT timing-risk framing, and decision routing. It does not contain employer data, real station figures, internal context, or company identity.",
         "Delay Category / Owner basis: DelayCategory.",
-        "TAT layer caveat: TAT layer is not included in this public demo. In the full methodology, TAT is used as a turnaround execution risk layer.",
+        "TAT layer caveat: TAT is represented as a decision-support lens in this public demo, using synthetic framing rather than private operational timing evidence.",
         f"Technical appendix is {appendix_state}.",
     ]
 
@@ -1320,7 +1320,7 @@ def build_pdf_bytes(
             story.append(Spacer(1, 2))
         story.append(Spacer(1, 8))
 
-    story.append(Paragraph("IntelligenceOps Decision Pack", cover_title_style))
+    story.append(Paragraph("IntelligenceOps Synthetic Executive Decision Memo", cover_title_style))
     story.append(Spacer(1, 8))
     story.append(Paragraph("Demo Data | Flight Operations Intelligence", cover_subtitle_style))
     story.append(Spacer(1, 8))
@@ -1328,7 +1328,7 @@ def build_pdf_bytes(
         f"Scope: {PUBLIC_SCOPE_LABEL}",
         f"Selection: {grain} | {period_selected} | {station_selected}",
         datetime.now().strftime("Generated: %Y-%m-%d %H:%M:%S"),
-        "This public pack uses demo data to demonstrate method, governance, and decision routing. It does not contain employer data, real station figures, internal context, or company identity.",
+        "This public memo uses demo data to demonstrate method, governance, TAT timing-risk framing, and decision routing. It does not contain employer data, real station figures, internal context, or company identity.",
     ]
     for line in cover_lines:
         story.append(Paragraph(line, normal_style))
@@ -1365,7 +1365,7 @@ def build_pdf_bytes(
     if include_appendix:
         story.append(PageBreak())
         story.append(Paragraph("Sanitized Technical Appendix", styles["Heading1"]))
-        story.append(Paragraph("Appendix contains public-safe contract status only. Local paths and raw run context are intentionally excluded.", styles["Normal"]))
+        story.append(Paragraph("Appendix contains public-safe contract status only. Local paths and raw validation context are intentionally excluded.", styles["Normal"]))
         story.append(Spacer(1, 8))
         appendix_pdf = df_for_pdf(appendix_df, ["Item", "Status", "Detail"], max_rows=20)
         add_table_from_df("Demo Data Contract", appendix_pdf)
@@ -1507,7 +1507,7 @@ def export_decision_pack_pdf(
     pareto_chart_png = build_pareto_png(drivers_df) if include_drivers else None
 
     pdf_bytes = build_pdf_bytes(
-        title="IntelligenceOps Decision Pack",
+        title="IntelligenceOps Synthetic Executive Decision Memo",
         grain=grain,
         period_selected=period_selected,
         station_selected=station_selected,
@@ -1548,7 +1548,7 @@ def parse_flag_int(v: Any) -> bool:
 
 
 def cli_main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Public-safe synthetic decision pack exporter")
+    parser = argparse.ArgumentParser(description="Public-safe synthetic executive decision memo exporter")
     parser.add_argument("--region", required=True)
     parser.add_argument("--mode", required=True)
     parser.add_argument("--grain", required=True, choices=["Monthly", "Weekly"])
@@ -1591,7 +1591,7 @@ def cli_main(argv: list[str] | None = None) -> int:
         )
         latest_pdf_path = (REPO_ROOT / "artifacts" / "prework_out" / "DecisionPack__LATEST.pdf")
 
-        verdict = "D7_PDF=PASS SyntheticDecisionPackGenerated=1"
+        verdict = "D7_PDF=PASS SyntheticExecutiveDecisionMemoGenerated=1"
         write_text_log(
             log_path,
             [
@@ -1631,11 +1631,11 @@ if __name__ == "__main__" and not is_streamlit_runtime():
 
 
 if is_streamlit_runtime():
-    st.set_page_config(page_title="Synthetic Decision Pack", layout="wide")
+    st.set_page_config(page_title="Synthetic Executive Decision Memo", layout="wide")
 
-    st.title("Synthetic Decision Pack")
+    st.title("Synthetic Executive Decision Memo")
     st.caption(
-        "Public demo PDF using synthetic flight operations artifacts. "
+        "Public demo PDF using synthetic flight operations artifacts, TAT timing-risk framing, and action-routing logic. "
         "No employer data, real station figures, internal context, or company identity is present."
     )
 
@@ -1659,11 +1659,11 @@ if is_streamlit_runtime():
         st.error("Demo data context is unavailable.")
         st.stop()
 
-    with st.expander("Demo Data Contract", expanded=False):
+    with st.expander("Synthetic Data Contract", expanded=False):
         contract_status = "available" if required_files else "not available"
         st.write(f"Scope: {PUBLIC_SCOPE_LABEL}")
         st.write(f"Contract: {contract_status}")
-        st.write(f"Registered artifacts: {len(required_files)}")
+        st.write(f"Validation artifacts: {len(required_files)}")
 
     if not required_files:
         st.warning("Demo data contract registry is unavailable; generation may fail contract checks.")
@@ -1675,7 +1675,7 @@ if is_streamlit_runtime():
     station_summary = "NETWORK" if stations_from_filters == ["NETWORK"] else f"{len(stations_from_filters)} selected"
     st.caption(f"Filters: Grain={grain} | Periods={period_summary} | Stations={station_summary}")
 
-    st.caption("Leadership sections are included by default: executive summary, action lanes, station impact, delay context, KPI summary, and caveats.")
+    st.caption("Leadership sections are included by default: executive summary, TAT timing-risk framing, action lanes, station impact, delay context, KPI summary, and caveats.")
     include_snapshot = True
     include_ranking = True
     include_drivers = True
@@ -1776,7 +1776,7 @@ if is_streamlit_runtime():
 
             st.session_state["decision_pack_pdf_bytes"] = pdf_bytes
             st.session_state["decision_pack_pdf_name"] = PUBLIC_PDF_FILENAME
-            st.success("Synthetic decision pack generated. Use the download button below.")
+            st.success("Synthetic executive decision memo generated. Use the download button below.")
         except Exception as e:
             st.error(f"PDF generation failed: {type(e).__name__}: {e}")
 

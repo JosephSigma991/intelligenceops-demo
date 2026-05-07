@@ -152,11 +152,11 @@ def build_network_frame(df: pd.DataFrame, grain: str, filters: dict[str, Any] | 
 
 
 st.title("Network Overview")
-st.caption("PASS-only artifacts view. Reads run_stamp and published CSVs only.")
+st.caption("Synthetic public demo view. Reads validated demo artifacts only.")
 
 ctx = st.session_state.get("mode_a_ctx")
 if not isinstance(ctx, dict):
-    st.error("Select a run in the sidebar")
+    st.error("Select a demo scope in the sidebar")
     st.stop()
 render_freshness_banner(ctx)
 render_gate_verdict_banner(ctx)
@@ -178,13 +178,13 @@ artifacts_by_name = ctx.get("artifacts_by_name", {}) or {}
 insights_dir = Path(ctx.get("insights_dir", Path(os.getenv("FLIGHTOPS_INSIGHTS_DIR", r"C:\Users\IT\02_insights\insight_out"))))
 
 if not region or not mode:
-    st.error("Run context is missing region/mode.")
+    st.error("Validation context is missing region/mode.")
     st.stop()
 
-with st.expander("📋 Data Source Details", expanded=False):
+with st.expander("Synthetic Data & Validation Details", expanded=False):
     prov_cols = st.columns(5)
     prov_cols[0].metric("Region/Mode", f"{region}/{mode}")
-    prov_cols[1].metric("Build ID", str(stamp) if stamp else "<missing>")
+    prov_cols[1].metric("Validation ID", str(stamp) if stamp else "<missing>")
     prov_cols[2].metric("Branch", str(git_branch) if git_branch else "<missing>")
     prov_cols[3].metric("Version", str(git_commit)[:8] if git_commit else "<missing>")
     qa_state = "exists" if (qa_path is not None and qa_path.exists()) else "missing"
@@ -362,5 +362,4 @@ with t2:
         show_plotly(fig_avg, key="p10__avg_delay_trend")
     else:
         st.info("<missing>")
-
 

@@ -211,7 +211,7 @@ def _artifact_name_for_key(key_or_filename: str, region: str) -> str:
 def resolve_artifact_path(key_or_filename: str) -> Path:
     ctx = st.session_state.get("mode_a_ctx")
     if not isinstance(ctx, dict):
-        st.error("Run context missing. Select a run in the sidebar.")
+        st.error("Validation context missing. Select a demo scope in the sidebar.")
         st.stop()
 
     region = str(ctx.get("region", "")).strip()
@@ -559,7 +559,7 @@ inject_premium_css()
 
 st.info(
     "**Public demo — synthetic data only.**\n\n"
-    "This app demonstrates flight operations intelligence architecture, KPI governance, delay attribution, scenario design, and decision-pack workflow.\n\n"
+    "This app demonstrates flight operations intelligence architecture, KPI governance, delay attribution, scenario design, TAT timing-risk exposure, and executive memo workflow.\n\n"
     "Station codes, delay minutes, OTP figures, trends, and scenario outputs are computer-generated.\n\n"
     "No employer data, real station figures, internal context, or company identity is present.",
     icon="ℹ️",
@@ -579,12 +579,12 @@ qa_df = ctx.get("qa_df")
 required_files = ctx.get("required_files", [])
 
 # ── Compact metadata behind expander for management pages ──
-with st.expander("📋 Data Source & Pipeline Details", expanded=False):
+with st.expander("Synthetic Data & Validation Details", expanded=False):
     hdr_c1, hdr_c2, hdr_c3, hdr_c4 = st.columns(4)
     hdr_c1.metric("Region", f"{region} / {mode}")
-    hdr_c2.metric("Build ID", str(stamp) if stamp else "<missing>")
+    hdr_c2.metric("Validation ID", str(stamp) if stamp else "<missing>")
     hdr_c3.metric("Version", str(git_commit)[:8] if git_commit else "<missing>")
-    hdr_c4.metric("QA File", Path(str(qa_path)).name if qa_path else "<missing>")
+    hdr_c4.metric("Validation File", Path(str(qa_path)).name if qa_path else "<missing>")
 
 if not isinstance(qa_df, pd.DataFrame) or qa_df.empty:
     st.error("Contract gate failed: qa_summary is missing or empty.")
@@ -1232,7 +1232,7 @@ st.markdown(
 with st.expander("Delay Code Analysis", expanded=False):
     if decision_pack_split_blocked:
         st.warning(
-            "Decision Pack category/code split insights are disabled for this grain because Category/Owner minutes are annual-only or code splits are non-periodized."
+            "Executive memo category/code split insights are disabled for this grain because Category/Owner minutes are annual-only or code splits are non-periodized."
         )
     else:
         codes_df = safe_filter_station(codes_raw, stations_sel)

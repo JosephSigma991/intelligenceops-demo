@@ -195,11 +195,11 @@ def _discover_log_path(
 
 
 st.title("Data Quality / Coverage")
-st.caption("PASS-only | Evidence: run_stamp + qa_summary + Ops Gate Pack + B1 publish + A6 runtime proof logs.")
+st.caption("Synthetic public demo view. Validation coverage for governed KPI artifacts and executive proof outputs.")
 
 ctx = st.session_state.get("mode_a_ctx")
 if not isinstance(ctx, dict):
-    st.error("Select a run in the sidebar")
+    st.error("Select a demo scope in the sidebar")
     st.stop()
 render_freshness_banner(ctx)
 filters = st.session_state.get("mode_a_filters")
@@ -221,7 +221,7 @@ qa_summary_path = ctx.get("qa_path")
 artifacts_by_name = ctx.get("artifacts_by_name", {}) or {}
 
 if not region or not mode:
-    st.error("Run context is missing region/mode.")
+    st.error("Validation context is missing region/mode.")
     st.stop()
 ops_gate_verdict = maybe_get(run_stamp, "ops_gate_pack_verdict", "OpsGatePackVerdict")
 ops_gate_log_path_ref = maybe_get(run_stamp, "ops_gate_pack_log_path", "OpsGatePackLogPath")
@@ -236,16 +236,28 @@ runtime_data_log(f"RunStampPath={stamp_json_path}")
 runtime_data_log(f"QaSummaryPath={qa_summary_path}")
 runtime_data_log(f"OpsGateLogPath={ops_gate_log_path}")
 
-st.subheader("Section A: Provenance & Gate Evidence")
+st.subheader("Section A: Validation Coverage")
 p1, p2, p3, p4, p5 = st.columns(5)
-p1.metric("Stamp", str(stamp) if stamp else "<missing>")
+p1.metric("Validation ID", str(stamp) if stamp else "<missing>")
 p2.metric("Region", str(region))
 p3.metric("Mode", str(mode))
 p4.metric("Git Branch", str(git_branch) if git_branch else "<missing>")
 p5.metric("Git Commit", str(git_commit) if git_commit else "<missing>")
 
-st.caption(f"Scope: {region} / {mode} | Stamp: {stamp or '<missing>'}")
-with st.expander("Evidence paths", expanded=True):
+show_technical = st.toggle("Show technical validation evidence", value=False)
+if not show_technical:
+    summary_rows = [
+        {"Layer": "Synthetic artifact registry", "Status": "Available" if required_files else "Not available"},
+        {"Layer": "Validation summary", "Status": "Available" if qa_summary_path is not None and qa_summary_path.exists() else "Not available"},
+        {"Layer": "Governed KPI coverage", "Status": "Review technical details" if required_files else "Needs validation"},
+        {"Layer": "Technical paths and logs", "Status": "Hidden by default"},
+    ]
+    st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
+    st.caption("Enable technical validation evidence only when reviewing pipeline mechanics.")
+    st.stop()
+
+st.caption(f"Scope: {region} / {mode} | Validation ID: {stamp or '<missing>'}")
+with st.expander("Technical validation paths", expanded=False):
     st.text(f"RunStampJSON : {stamp_json_path}")
     st.text(f"QA Summary   : {qa_summary_path or '<not set>'}")
     st.text(f"OpsGateLog   : {ops_gate_log_path or '<not set>'}")
@@ -253,7 +265,7 @@ with st.expander("Evidence paths", expanded=True):
 if isinstance(ops_gate_verdict, str) and ops_gate_verdict.strip():
     st.code(ops_gate_verdict.strip(), language="text")
 else:
-    st.info("ops_gate_pack_verdict missing from run_stamp")
+    st.info("ops_gate_pack_verdict missing from validation manifest")
 
 if isinstance(ops_gate_stamp, str) and ops_gate_stamp.strip():
     st.caption(f"ops_gate_pack_stamp: `{ops_gate_stamp}`")
@@ -337,7 +349,7 @@ else:
 
 st.subheader("Section B: Required Files Health")
 if not required_files:
-    st.warning("run_stamp.required_files is missing/empty.")
+    st.warning("Validation manifest required_files is missing/empty.")
 
 qa_df: pd.DataFrame | None = None
 qa_lookup: dict[str, dict[str, Any]] = {}

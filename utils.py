@@ -305,9 +305,9 @@ def parse_stamp_dt(stamp: Any) -> datetime | None:
 
 
 def render_freshness_banner(ctx: dict, warn_days: int = 7) -> None:
-    """Render a data-freshness info/warning banner using the run stamp timestamp.
+    """Render a data-freshness info/warning banner using the validation manifest timestamp.
 
-    Always shows: "Data as of: <date> · <N> days ago · Stamp: <stamp>"
+    Always shows: "Data as of: <date> · <N> days ago · Validation ID: <stamp>"
     Escalates to st.warning if age > warn_days.
     Safe to call even if ctx is missing, stamp is unparseable, or no Streamlit runtime.
     """
@@ -332,7 +332,7 @@ def render_freshness_banner(ctx: dict, warn_days: int = 7) -> None:
 
     if stamp_dt is None:
         import streamlit as st
-        st.info("ℹ️ Data freshness unknown — run stamp timestamp could not be parsed.")
+        st.info("Data freshness unknown because the validation manifest timestamp could not be parsed.")
         return
 
     # Issue #7: full-day rounding via total_seconds
@@ -347,7 +347,7 @@ def render_freshness_banner(ctx: dict, warn_days: int = 7) -> None:
     else:
         age_str = f"{age_days} days ago"
 
-    info_line = f"📅 Data as of: **{stamp_label}** · {age_str} · Stamp: `{stamp}`"
+    info_line = f"Data as of: **{stamp_label}** | {age_str} | Validation ID: `{stamp}`"
 
     import streamlit as st
     if age_days > warn_days:
