@@ -138,12 +138,12 @@ def get_run_context_for_region_mode(insights_dir: Path, region: str, mode: str) 
             selected = item
             break
     if selected is None:
-        raise FileNotFoundError(f"run_stamp not found for region/mode under {insights_dir}: {region}/{mode}")
+        raise FileNotFoundError(f"validation manifest not found for region/mode under {insights_dir}: {region}/{mode}")
 
     source_path = Path(selected["path"])
     run_stamp, run_stamp_err = safe_read_json(source_path)
     if run_stamp is None:
-        raise RuntimeError(f"Could not read run_stamp: {run_stamp_err}")
+        raise RuntimeError(f"Could not read validation manifest: {run_stamp_err}")
 
     effective_insights_dir = insights_dir
     insights_from_stamp = maybe_get(run_stamp, "insights_dir", "InsightsDir")
@@ -154,7 +154,7 @@ def get_run_context_for_region_mode(insights_dir: Path, region: str, mode: str) 
 
     required_files = ensure_list(maybe_get(run_stamp, "required_files", "RequiredFiles"))
     if not required_files:
-        raise RuntimeError("run_stamp.required_files is missing/empty.")
+        raise RuntimeError("validation manifest required_files is missing/empty.")
 
     qa_path = resolve_qa_path(run_stamp, effective_insights_dir, str(selected["region"]), str(selected["mode"]))
     artifacts_by_name = build_artifact_index(effective_insights_dir, required_files)
@@ -194,9 +194,9 @@ def get_or_select_run_context(st, insights_dir: Path) -> dict[str, Any]:
     run_stamps = [r for r in all_stamps if _stamp_is_pass(r, insights_dir)]
     if not run_stamps:
         if all_stamps:
-            st.error("No PASS scopes available — required files missing for all discovered run stamps.")
+            st.error("No PASS scopes available because required files are missing for all discovered validation manifests.")
         else:
-            st.error(f"No run stamp files found under: `{insights_dir}` (pattern: `run_stamp__*__*.json`)")
+            st.error(f"No validation manifest files found under: `{insights_dir}` (pattern: `run_stamp__*__*.json`)")
         st.stop()
 
     options = [str(r["region"]) for r in run_stamps]
@@ -221,7 +221,7 @@ def get_or_select_run_context(st, insights_dir: Path) -> dict[str, Any]:
 
     run_stamp, run_stamp_err = safe_read_json(run_stamp_path)
     if run_stamp is None:
-        st.error(f"Could not read run stamp `{run_stamp_path}`")
+        st.error(f"Could not read validation manifest `{run_stamp_path}`")
         st.code(run_stamp_err or "unknown error")
         st.stop()
 
@@ -240,7 +240,7 @@ def get_or_select_run_context(st, insights_dir: Path) -> dict[str, Any]:
 
     required_files = ensure_list(maybe_get(run_stamp, "required_files", "RequiredFiles"))
     if not required_files:
-        st.error("run_stamp.required_files is missing/empty.")
+        st.error("validation manifest required_files is missing/empty.")
         st.stop()
 
     qa_path = resolve_qa_path(run_stamp, effective_insights_dir, region, mode)
@@ -255,7 +255,7 @@ def get_or_select_run_context(st, insights_dir: Path) -> dict[str, Any]:
         try:
             qa_df = load_qa_summary(qa_path, effective_insights_dir)
         except Exception as e:
-            st.error(f"Could not read qa_summary `{qa_path}`: {type(e).__name__}: {e}")
+            st.error(f"Could not read validation summary `{qa_path}`: {type(e).__name__}: {e}")
             st.stop()
 
     try:

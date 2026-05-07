@@ -30,11 +30,11 @@ def normalize_category(v: Any) -> str:
 
 
 st.title("Drivers / RCA")
-st.caption("PASS-only. Accountability (DelayCategory) -> drilldown to codes. No SQL.")
+st.caption("Synthetic public demo view. Accountability uses DelayCategory for decision ownership.")
 
 ctx = st.session_state.get("mode_a_ctx")
 if not isinstance(ctx, dict):
-    st.error("Select a run in the sidebar")
+    st.error("Select a demo scope in the sidebar")
     st.stop()
 render_freshness_banner(ctx)
 render_gate_verdict_banner(ctx)
@@ -53,11 +53,11 @@ insights_dir = Path(ctx.get("insights_dir", Path(os.getenv("FLIGHTOPS_INSIGHTS_D
 artifacts_by_name = ctx.get("artifacts_by_name", {}) or {}
 
 if not region or not mode:
-    st.error("Run context is missing region/mode.")
+    st.error("Validation context is missing region/mode.")
     st.stop()
 
-with st.expander("📋 Data Source Details", expanded=False):
-    st.caption(f"Region: {region}/{mode} · Build ID: {stamp}")
+with st.expander("Synthetic Data & Validation Details", expanded=False):
+    st.caption(f"Region: {region}/{mode} | Validation ID: {stamp}")
 grain = str(filters.get("grain", "Monthly"))
 periods_from_filters = [str(p) for p in filters.get("periods", []) if str(p).strip()]
 stations_from_filters = [str(s) for s in filters.get("stations", []) if str(s).strip()]
@@ -457,5 +457,4 @@ else:
         own_tbl = owner_sum.head(10).copy()
         own_tbl["Minutes"] = own_tbl["Minutes"].map(lambda v: f"{float(v):,.0f}")
         st.dataframe(own_tbl, width="stretch", hide_index=True)
-
 

@@ -37,11 +37,11 @@ def metric_direction(label: str) -> str:
 
 
 st.title("Station Ranking")
-st.caption("PASS-only. Reads published artifacts and run logs only.")
+st.caption("Synthetic public demo view. Reads validated demo artifacts only.")
 
 ctx = st.session_state.get("mode_a_ctx")
 if not isinstance(ctx, dict):
-    st.error("Select a run in the sidebar")
+    st.error("Select a demo scope in the sidebar")
     st.stop()
 render_freshness_banner(ctx)
 render_gate_verdict_banner(ctx)
@@ -62,7 +62,7 @@ insights_dir = Path(ctx.get("insights_dir", Path(os.getenv("FLIGHTOPS_INSIGHTS_D
 artifacts_by_name = ctx.get("artifacts_by_name", {}) or {}
 
 if not region or not mode:
-    st.error("Run context is missing region/mode.")
+    st.error("Validation context is missing region/mode.")
     st.stop()
 
 monthly_name = f"2025_DEP_Monthly_Station_KPIs__{region}.csv"
@@ -71,16 +71,16 @@ monthly_in_req, monthly_path = resolve_required_file(required_files, monthly_nam
 weekly_in_req, weekly_path = resolve_required_file(required_files, weekly_name, insights_dir, artifacts_by_name)
 
 if not monthly_in_req:
-    st.error(f"Required file missing in run_stamp.required_files: `{monthly_name}`")
+    st.error(f"Required file missing in validation manifest: `{monthly_name}`")
 if not weekly_in_req:
-    st.error(f"Required file missing in run_stamp.required_files: `{weekly_name}`")
+    st.error(f"Required file missing in validation manifest: `{weekly_name}`")
 if (not monthly_in_req) and (not weekly_in_req):
     st.stop()
 
-with st.expander("📋 Data Source Details", expanded=False):
+with st.expander("Synthetic Data & Validation Details", expanded=False):
     hdr = st.columns(4)
     hdr[0].metric("Region/Mode", f"{region}/{mode}")
-    hdr[1].metric("Build ID", str(stamp) if stamp else "<missing>")
+    hdr[1].metric("Validation ID", str(stamp) if stamp else "<missing>")
     hdr[2].metric("Branch", str(git_branch) if git_branch else "<missing>")
     hdr[3].metric("Version", str(git_commit)[:8] if git_commit else "<missing>")
 grain = str(filters.get("grain", "Monthly"))
@@ -341,5 +341,4 @@ else:
                 legend=dict(orientation="h"),
             )
             show_plotly(fig_trend, key="p20__station_trend_preview")
-
 

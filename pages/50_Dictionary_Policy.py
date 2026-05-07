@@ -197,11 +197,11 @@ def build_qa_lookup(qa_df: pd.DataFrame | None) -> dict[str, dict[str, Any]]:
 # ── Page header ──────────────────────────────────────────────────────────────
 
 st.title("Dictionary / Policy")
-st.caption("PASS-only. Definitions + governance + provenance.")
+st.caption("Synthetic public demo view. Definitions, KPI governance, and validation coverage.")
 
 ctx = st.session_state.get("mode_a_ctx")
 if not isinstance(ctx, dict):
-    st.error("Select a run in the sidebar")
+    st.error("Select a demo scope in the sidebar")
     st.stop()
 render_freshness_banner(ctx)
 render_filter_banner(ctx, st.session_state.get("mode_a_filters", {}))
@@ -225,7 +225,7 @@ ops_gate_stamp = maybe_get(run_stamp, "ops_gate_pack_stamp", "OpsGatePackStamp")
 
 required_files = ensure_list(ctx.get("required_files"))
 if not required_files:
-    st.warning("run_stamp.required_files is missing/empty. Using baseline 13-file contract pattern for dictionary view.")
+    st.warning("Validation manifest required_files is missing/empty. Using baseline contract pattern for dictionary view.")
     required_files = baseline_required_files(region, mode)
 
 # ── Load QA summary (needed by both tabs) ────────────────────────────────────
@@ -236,7 +236,7 @@ if qa_path is not None and Path(qa_path).exists():
 
 # ── Tab layout ────────────────────────────────────────────────────────────────
 
-tab_kpi, tab_registry = st.tabs(["📋 KPI Definitions", "🗂 Artifact Registry"])
+tab_kpi, tab_registry = st.tabs(["KPI Definitions", "Validation Registry"])
 
 
 # ── Tab 1: KPI Definitions ────────────────────────────────────────────────────
@@ -253,7 +253,7 @@ with tab_kpi:
     st.markdown("- **Aerops exports use UTC timestamps** — no timezone conversion required.")
     st.markdown("- **Grain safety** — never use annual-only driver/category data for monthly or weekly views.")
     st.markdown("- **Gates:** Contract + LoaderGate + LandingDelays + DbSanity → OPS_GATE verdict.")
-    st.markdown("- **Evidence** — every run is stamped; logs are timestamped; UTF-8 and UTF-16LE logs handled.")
+    st.markdown("- **Evidence** — every public demo artifact is tied to a validation manifest; logs are technical details for review only.")
 
     st.download_button(
         label="⬇ Download KPI Dictionary CSV",
@@ -266,9 +266,9 @@ with tab_kpi:
 # ── Tab 2: Artifact Registry ──────────────────────────────────────────────────
 
 with tab_registry:
-    st.subheader("Provenance")
+    st.subheader("Validation Manifest")
     p1, p2, p3, p4, p5 = st.columns(5)
-    p1.metric("Stamp", str(stamp) if stamp else "<missing>")
+    p1.metric("Validation ID", str(stamp) if stamp else "<missing>")
     p2.metric("Region", str(region))
     p3.metric("Mode", str(mode))
     p4.metric("Git Branch", str(git_branch) if git_branch else "<missing>")
@@ -278,26 +278,26 @@ with tab_registry:
     if isinstance(ops_gate_line, str) and ops_gate_line.strip():
         st.code(ops_gate_line.strip(), language="text")
     else:
-        st.write("missing in run_stamp")
+        st.write("missing in validation manifest")
 
     if isinstance(ops_gate_stamp, str) and ops_gate_stamp.strip():
         st.caption(f"ops_gate_pack_stamp: `{ops_gate_stamp}`")
     if isinstance(ops_gate_log_path, str) and ops_gate_log_path.strip():
         st.caption(f"ops_gate_pack_log_path: `{ops_gate_log_path}`")
 
-    st.subheader("QA Summary")
+    st.subheader("Validation Summary")
     if qa_path is None:
-        st.error("qa_summary path: FAIL (cannot infer; missing stamp/qa_summary_path in run_stamp)")
+        st.error("Validation summary path: FAIL (cannot infer from validation manifest)")
     else:
-        st.write(f"qa_summary_path: `{qa_path}`")
+        st.write(f"Validation summary path: `{qa_path}`")
         if Path(qa_path).exists():
-            st.success("qa_summary existence: PASS")
+            st.success("Validation summary existence: PASS")
             if qa_df is not None:
                 st.dataframe(qa_df.head(5), width="stretch", hide_index=True)
             else:
-                st.error("Could not read qa_summary CSV.")
+                st.error("Could not read validation summary CSV.")
         else:
-            st.error("qa_summary existence: FAIL (file not found)")
+            st.error("Validation summary existence: FAIL (file not found)")
 
 
     st.subheader("Artifact Dictionary")

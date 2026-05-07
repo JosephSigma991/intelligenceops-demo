@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 
 
-st.set_page_config(page_title="Run & QA", layout="wide")
+st.set_page_config(page_title="Validation Coverage", layout="wide")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUN_LOGS_DIR = REPO_ROOT / "artifacts" / "run_logs"
@@ -272,8 +272,8 @@ def tail_text(p: Path, max_lines: int = 60) -> str:
     return "\n".join(lines[-max_lines:])
 
 
-st.title("Run & QA")
-st.caption("PASS-only provenance panel. Reads published artifacts and run logs only.")
+st.title("Validation Coverage")
+st.caption("Synthetic validation coverage panel. Technical paths, hashes, and logs are hidden by default for senior public visitors.")
 
 ctx = st.session_state.get("mode_a_ctx")
 if not isinstance(ctx, dict):
@@ -293,7 +293,7 @@ artifacts_by_name = ctx.get("artifacts_by_name", {}) or {}
 insights_dir = Path(ctx.get("insights_dir", Path(os.getenv("FLIGHTOPS_INSIGHTS_DIR", r"C:\Users\IT\02_insights\insight_out"))))
 
 if not region or not mode:
-    st.error("Run context is missing region/mode.")
+    st.error("Validation context is missing scope/mode.")
     st.stop()
 ops_gate_verdict_ref = maybe_get(run_stamp, "ops_gate_pack_verdict", "OpsGatePackVerdict")
 ops_gate_log_path_ref = maybe_get(run_stamp, "ops_gate_pack_log_path", "OpsGatePackLogPath")
@@ -305,18 +305,36 @@ if isinstance(ops_gate_log_path_ref, str) and ops_gate_log_path_ref.strip():
 latest_ops_gate_log = find_latest_ops_gate_log(RUN_LOGS_DIR, region, mode)
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Stamp", str(stamp) if stamp else "<missing>")
-col2.metric("Git Commit", str(git_commit) if git_commit else "<missing>")
-col3.metric("Required Files", str(len(required_files)))
+col1.metric("Validation ID", str(stamp) if stamp else "<missing>")
+col2.metric("Version", str(git_commit)[:8] if git_commit else "<missing>")
+col3.metric("Validation Artifacts", str(len(required_files)))
 col4.metric("Scope", f"{region}/{mode}")
 
-with st.expander("Run Stamp Details", expanded=True):
+st.info(
+    "This page shows whether the synthetic public demo has the artifacts needed for governed KPI views, "
+    "TAT timing-risk framing, action routing, and executive memo generation. No employer data or private evidence is shown."
+)
+
+show_technical = st.toggle("Show technical validation details", value=False)
+if not show_technical:
+    qa_loaded = qa_path is not None and Path(qa_path).exists()
+    summary_rows = [
+        {"Layer": "Synthetic artifact registry", "Status": "Available" if required_files else "Not available"},
+        {"Layer": "Validation summary", "Status": "Available" if qa_loaded else "Not available"},
+        {"Layer": "Decision memo readiness", "Status": "Ready" if required_files and qa_loaded else "Needs validation"},
+        {"Layer": "Technical validation detail", "Status": "Hidden by default"},
+    ]
+    st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
+    st.caption("Enable technical validation details only when reviewing pipeline mechanics.")
+    st.stop()
+
+with st.expander("Validation Manifest Details", expanded=False):
     st.write(f"Path: `{selected_path}`")
     st.write(f"SHA256: `{file_sha256(selected_path) or '<unavailable>'}`")
     if qa_path is not None:
-        st.write(f"QA Summary Path (resolved): `{qa_path}`")
+        st.write(f"Validation Summary Path (resolved): `{qa_path}`")
     else:
-        st.write("QA Summary Path (resolved): `<missing>`")
+        st.write("Validation Summary Path (resolved): `<missing>`")
     coverage = {k: v for k, v in run_stamp.items() if "coverage" in str(k).lower()}
     if coverage:
         st.json(coverage)
@@ -501,7 +519,7 @@ for name in required_files:
     )
 required_health_df = pd.DataFrame(required_health_rows, columns=["file", "exists", "size_bytes", "mtime"])
 if required_health_df.empty:
-    st.info("No `required_files` entries found in run stamp.")
+    st.info("No `required_files` entries found in validation manifest.")
 else:
     st.dataframe(required_health_df, width='stretch', hide_index=True)
 
@@ -537,7 +555,7 @@ for row in all_path_refs:
 
 log_refs_df = pd.DataFrame(log_ref_rows, columns=["key_path", "path", "exists", "size_bytes", "mtime_iso"])
 if log_refs_df.empty:
-    st.info("No log/text path references found in run stamp.")
+    st.info("No log/text path references found in validation manifest.")
 else:
     st.dataframe(log_refs_df, width='stretch', hide_index=True)
     for r in log_ref_rows:
@@ -569,7 +587,7 @@ if has_ops_ref:
             with st.expander("View log tail", expanded=False):
                 st.code(tail_text(ops_gate_log_ref, 60), language="text")
         else:
-            st.info(f"Ops Gate Pack log path from run_stamp does not exist: `{ops_gate_log_ref}`")
+            st.info(f"Ops Gate Pack log path from validation manifest does not exist: `{ops_gate_log_ref}`")
 else:
     ops_gate_log = latest_ops_gate_log
     if ops_gate_log is None:
@@ -587,7 +605,7 @@ required_count = len(required_files)
 fail_count = 0 if fail_df.empty else len(fail_df)
 
 if required_count == 0:
-    st.error("FAIL: `required_files` list is missing/empty in run stamp.")
+    st.error("FAIL: `required_files` list is missing/empty in validation manifest.")
 else:
     if fail_count == 0:
         st.success(f"PASS: Required={required_count}, Missing/Empty=0")
@@ -603,9 +621,9 @@ with st.expander("All Required Files Status", expanded=False):
 
 st.subheader("QA Summary")
 if qa_path is None:
-    st.error("FAIL: QA summary path could not be resolved from run stamp.")
+    st.error("FAIL: validation summary path could not be resolved from validation manifest.")
 else:
-    st.write(f"Expected/Resolved QA file: `{qa_path}`")
+    st.write(f"Expected/resolved validation file: `{qa_path}`")
     if qa_path.exists():
         st.caption(
             f"Size={qa_path.stat().st_size:,} bytes | "
